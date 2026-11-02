@@ -169,6 +169,49 @@ def run_next_local():
         print(">>> Nenhuma microtarefa local pendente na fila.")
 
 
+def run_mtv_batch(task_name: str | None = None, n: int = 3):
+    print("=" * 65)
+    print(f" [MTV CORE] BEST-OF-N GERAÇÃO & ORÁCULO PYTEST (N={n})")
+    print("=" * 65)
+    from pci_engine.mtv_core import make_ollama_generator, solve_task
+    tasks_dir = REPO_ROOT / "tasks"
+    out_dir = REPO_ROOT / "mtv_out"
+    out_dir.mkdir(exist_ok=True)
+    gen = make_ollama_generator(host="http://127.0.0.1:11434", model="huihui_ai/qwen2.5-coder-abliterate:3b")
+
+    if task_name:
+        candidates = [tasks_dir / task_name]
+    else:
+        candidates = [d for d in tasks_dir.iterdir() if d.is_dir() and (d / "task.md").exists() and list(d.glob("test_*.py"))]
+
+    if not candidates:
+        print("Nenhuma micro-tarefa com task.md e test_*.py encontrada.")
+        return
+
+    for tdir in candidates:
+        print(f"\n--- Processando tarefa: {tdir.name} ---")
+        try:
+            passed = solve_task(task_dir=tdir, out_dir=out_dir, generator=gen, n=n, log=print)
+            print(f"Resultado final [{tdir.name}]: {'APROVADO (Exit Code 0)' if passed else 'REPROVADO'}")
+        except Exception as e:
+            print(f"Erro ao executar tarefa {tdir.name}: {e}")
+
+
+def check_hard_wallet():
+    print("=" * 65)
+    print(" [HARD WALLET] DIAGNÓSTICO DE CHAVEIRO USB FÍSICO")
+    print("=" * 65)
+    from pci_engine.hard_wallet import HardWalletManager
+    st = HardWalletManager.get_wallet_status()
+    print(f"Unidades removíveis detectadas: {st['drives_count']} {st['drives']}")
+    if st['wallet_connected']:
+        print(f"Status Hard Wallet: CONECTADA [OK]")
+        print(f"Arquivo de Chave:   {st['key_file']}")
+        print(f"Chave Mascarada:    {st['masked_key']}")
+    else:
+        print("Status Hard Wallet: DESCONECTADA [X] (Nenhum pendrive com .vault_key encontrado)")
+
+
 def launch_aider(target_files: list[str]):
     print("=" * 65)
     print(" [AIDER CLI] SESSÃO RESTRITA COM TESTES AUTOMÁTICOS")
@@ -189,6 +232,8 @@ def main():
     parser.add_argument("--aider", nargs="+", metavar="ARQUIVO", help="Dispara Aider com TDD nos arquivos passados")
     parser.add_argument("--run-harness", metavar="TASK_ID", help="Executa tarefa específica com MicroHarness (<1k tokens)")
     parser.add_argument("--run-local", action="store_true", help="Puxa e executa próxima microtarefa elegível com o modelo local 3B")
+    parser.add_argument("--mtv", nargs="?", const="ALL", metavar="TASK", help="Executa motor MTV Best-of-N em tasks/ (opcional: nome da tarefa)")
+    parser.add_argument("--hard-wallet", action="store_true", help="Diagnostica pendrives USB e chave física Hard Wallet")
     args = parser.parse_args()
 
     if args.clean_ram:
@@ -208,6 +253,11 @@ def main():
         launch_micro_harness(args.run_harness)
     elif args.run_local:
         run_next_local()
+    elif args.mtv:
+        task_arg = None if args.mtv == "ALL" else args.mtv
+        run_mtv_batch(task_name=task_arg)
+    elif args.hard_wallet:
+        check_hard_wallet()
     else:
         check_status()
         print("\nComandos disponíveis:")
@@ -220,6 +270,8 @@ def main():
         print("  python -m pci_engine.cli --start-broker        (Sobe API FastAPI para Doadores Tailscale)")
         print("  python -m pci_engine.cli --run-nightly         (Executa fila noturna Colibrì mmap)")
         print("  python -m pci_engine.cli --aider <arqs>        (Abre sessão contida no Aider)")
+        print("  python -m pci_engine.cli --mtv [tarefa]        (Executa motor Best-of-N com oráculo Pytest)")
+        print("  python -m pci_engine.cli --hard-wallet         (Diagnóstica Hard Wallet física USB)")
 
 
 if __name__ == "__main__":
