@@ -280,7 +280,7 @@ class PCIRouter:
             test_file.write_text(test_code, encoding="utf-8")
 
             res = subprocess.run(
-                [sys.executable, "-m", "pytest", "-q", "--tb=short", "--disable-warnings", str(test_file)],
+                [sys.executable, "-m", "pytest", "-q", "--tb=short", "-o", "pythonpath=.", "--disable-warnings", str(test_file)],
                 cwd=str(worktree_dir),
                 capture_output=True,
                 text=True,
@@ -301,15 +301,21 @@ class PCIRouter:
     ) -> Tuple[bool, str, str]:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            target_file = tmp_path / Path(target_file_path).name
-            test_file = tmp_path / f"test_{target_file.name}"
-
+            target_file = tmp_path / target_file_path
+            target_file.parent.mkdir(parents=True, exist_ok=True)
             target_file.write_text(candidate_code, encoding="utf-8")
+
+            # Também espelha na raiz caso o teste faça import direto sem prefixo de pasta
+            target_root = tmp_path / Path(target_file_path).name
+            if target_root != target_file:
+                target_root.write_text(candidate_code, encoding="utf-8")
+
+            test_file = tmp_path / f"test_{Path(target_file_path).name}"
             test_file.write_text(test_code, encoding="utf-8")
 
             try:
                 res = subprocess.run(
-                    [sys.executable, "-m", "pytest", "-q", "--tb=short", "--disable-warnings", str(test_file)],
+                    [sys.executable, "-m", "pytest", "-q", "--tb=short", "-o", "pythonpath=.", "--disable-warnings", str(test_file)],
                     cwd=tmpdir,
                     capture_output=True,
                     text=True,

@@ -165,6 +165,16 @@ class MasterbookDecomposer:
             target_match = re.search(r"(?:Arquivo(?:-Alvo)?|Target):\s*`?([^\n`]+)`?", block, re.IGNORECASE)
             target_file = target_match.group(1).strip() if target_match else f"src/{task_id.lower()}.py"
 
+            # Procura metadados de privacidade, linhas e tipo
+            privacy_match = re.search(r"(?:Privacidade|Privacy):\s*`?([A-Z_]+)`?", block, re.IGNORECASE)
+            privacy = privacy_match.group(1).strip() if privacy_match else "PUBLIC"
+
+            lines_match = re.search(r"(?:Linhas|Lines):\s*(\d+)", block, re.IGNORECASE)
+            lines = int(lines_match.group(1)) if lines_match else 25
+
+            type_match = re.search(r"(?:Tipo|Type):\s*`?([A-Z_]+)`?", block, re.IGNORECASE)
+            task_type = type_match.group(1).strip() if type_match else "EXTRACTION"
+
             # Procura código de teste dentro de blocos ```python ... ```
             py_blocks = re.findall(r"```python(.*?)```", block, re.DOTALL)
             test_code = py_blocks[-1].strip() if py_blocks else "def test_auto(): assert True\n"
@@ -174,10 +184,10 @@ class MasterbookDecomposer:
                 task_id=task_id,
                 parent_masterbook=parent_name,
                 depends_on_task_id=prev_task_id,
-                task_type="EXTRACTION",
-                privacy_level="PUBLIC",
+                task_type=task_type,
+                privacy_level=privacy,
                 permission_level=2,
-                estimated_lines=25,
+                estimated_lines=lines,
                 spec_markdown=block,
                 test_code=test_code,
                 target_file_path=target_file,
