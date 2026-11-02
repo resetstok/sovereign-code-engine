@@ -2458,6 +2458,24 @@ class PCIMasterGUI:
                     db_manager=self.db,
                 )
                 self.log(f"Cofre trancado com sucesso para o Drive! Salvo em: {vault['relative_spool_path']}")
+
+                def update_box_vault() -> None:
+                    if hasattr(self, "sanitizer_output_box"):
+                        report_append = (
+                            "\n=========================================================================\n"
+                            "       COFRE DE EXTRAÇÃO SENSÍVEL TRANCADO (SENHA DO OPERADOR)           \n"
+                            "=========================================================================\n"
+                            f"Nó Doador / Origem:   {vault.get('node_name', 'MASTER_NODE')}\n"
+                            f"Caminho do Pacote:    {vault.get('relative_spool_path')}\n"
+                            f"SHA-256 Original:     {vault.get('original_sha256')}\n"
+                            f"Tamanho Cifrado:      {vault.get('encrypted_bytes_size')} bytes\n"
+                            "Status Sincronização: Pronto para Offload Seguro no Drive (Subpasta do Doador)\n"
+                            "=========================================================================\n"
+                        )
+                        self.sanitizer_output_box.insert("end", report_append)
+                        self.sanitizer_output_box.see("end")
+
+                self.dispatch_to_ui(update_box_vault)
                 messagebox.showinfo(
                     "Cofre Trancado",
                     f"Dados sensíveis protegidos com sua senha em:\n{vault['relative_spool_path']}\nPronto para sincronização com o Drive!"
@@ -2497,7 +2515,11 @@ class PCIMasterGUI:
                         file_path=result["derivative_path"],
                         spool_dir=spool_dir,
                     )
-                    spool_file = spool_res.get("encrypted_file", "OK")
+                    enc_target = Path(spool_res.get("encrypted_file", "OK"))
+                    try:
+                        spool_file = str(enc_target.relative_to(self.repo_root))
+                    except Exception:
+                        spool_file = enc_target.name
 
                 sample_text = ""
                 deriv_path = Path(result["derivative_path"])

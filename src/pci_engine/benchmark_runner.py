@@ -25,7 +25,14 @@ import psutil
 
 from pci_engine.database import DatabaseManager
 from pci_engine.preflight import PreflightChecker
-from tests.benchmark_suite.benchmark_tasks import BENCHMARK_TASKS
+
+try:
+    from pci_engine.benchmark_tasks import BENCHMARK_TASKS
+except ImportError:
+    try:
+        from tests.benchmark_suite.benchmark_tasks import BENCHMARK_TASKS
+    except ImportError:
+        BENCHMARK_TASKS = {}
 
 logger = logging.getLogger("pci_engine.benchmark_runner")
 
@@ -60,7 +67,7 @@ class BenchmarkRunner:
         vram_used_mb = 0.0
 
         try:
-            gpu_info = PreflightChecker.get_gpu_info()
+            gpu_info = PreflightChecker.check_gpu()
             if gpu_info.get("available"):
                 vram_used_mb = float(gpu_info.get("vram_used_mb", 0.0))
         except Exception:
