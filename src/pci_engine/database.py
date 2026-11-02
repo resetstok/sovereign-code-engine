@@ -400,9 +400,18 @@ class DatabaseManager:
             return cursor.rowcount > 0
 
     def clear_completed_tasks(self) -> int:
-        """Remove todas as tarefas com status VERIFIED da fila tasks_queue."""
+        """Remove todas as tarefas concluídas (VERIFIED) e tarefas sintéticas de teste de auditoria da fila."""
         with self.get_connection() as conn:
-            cursor = conn.execute("DELETE FROM tasks_queue WHERE status = 'VERIFIED'")
+            cursor = conn.execute(
+                """
+                DELETE FROM tasks_queue
+                WHERE status = 'VERIFIED'
+                   OR task_id LIKE 'TASK_E2E_%'
+                   OR task_id LIKE 'TASK_LEASE_%'
+                   OR task_id LIKE 'TASK_EXPIRED_%'
+                   OR task_id LIKE 'TASK_DONOR_FIRETEST_%'
+                """
+            )
             conn.commit()
             return cursor.rowcount
 
