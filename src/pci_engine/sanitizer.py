@@ -36,7 +36,7 @@ class ForensicSanitizer:
         "EMAIL": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b"),
         "IPV4": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
         "API_KEY": re.compile(r"\b(?:sk-[a-zA-Z0-9_-]{20,}|AIza[0-9A-Za-z-_]{35}|ghp_[a-zA-Z0-9]{36}|xox[baprs]-[0-9a-zA-Z]{10,})\b"),
-        "USER_PATH": re.compile(r"[C-Z]:\\+Users\\+[^\s\"\'\\]+", re.IGNORECASE),
+        "USER_PATH": re.compile(r"[C-Z]:\\+Users\\+[^\s\"\'<>]+", re.IGNORECASE),
     }
 
     @staticmethod
