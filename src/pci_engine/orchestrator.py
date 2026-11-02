@@ -392,6 +392,14 @@ class TaskExecutionOrchestrator:
     def _record_capability_sample(self, task_type: str, success: bool) -> None:
         """Atualiza a métrica ponderada na capability_matrix para o MASTER_NODE."""
         with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO nodes (
+                    node_id, node_name, role, ram_total_mb, vram_total_mb,
+                    ssd_free_gb, supported_models, status
+                ) VALUES ('MASTER_NODE', 'PC_MASTER', 'MASTER', 8192, 4096, 100.0, '["qwen2.5-coder:3b"]', 'ONLINE')
+                """
+            )
             row = conn.execute(
                 """
                 SELECT sample_size, success_rate FROM capability_matrix

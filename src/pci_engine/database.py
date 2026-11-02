@@ -135,17 +135,9 @@ class DatabaseManager:
         return conn
 
     def init_db(self) -> None:
-        """Inicializa todo o esquema de 5 tabelas da v2.0 e registra o nó MASTER_NODE se ausente."""
+        """Inicializa todo o esquema de 5 tabelas da v2.0."""
         with self.get_connection() as conn:
             conn.executescript(SCHEMA_SQL)
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO nodes (
-                    node_id, node_name, role, ram_total_mb, vram_total_mb,
-                    ssd_free_gb, supported_models, status
-                ) VALUES ('MASTER_NODE', 'PC_MASTER', 'MASTER', 8192, 4096, 100.0, '["qwen2.5-coder:3b"]', 'ONLINE')
-                """
-            )
             conn.commit()
 
     # -------------------------------------------------------------------------
