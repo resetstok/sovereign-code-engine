@@ -85,7 +85,7 @@ def test_run_single_task_failure(runner: BenchmarkRunner):
 
 def test_run_category_benchmark_and_db_update(runner: BenchmarkRunner, test_db: DatabaseManager):
     """Verifica que a execução de uma categoria atualiza a capability_matrix no SQLite WAL."""
-    cat_res = runner.run_category_benchmark("CRUD")
+    cat_res = runner.run_category_benchmark("CRUD", inference_fn=lambda prompt: ("", 0.05, 10))
     assert cat_res["category"] == "CRUD"
     assert cat_res["sample_size"] >= 2
     assert cat_res["passed_count"] >= 2
@@ -107,7 +107,8 @@ def test_run_category_benchmark_and_db_update(runner: BenchmarkRunner, test_db: 
 
 def test_run_full_suite_benchmark(runner: BenchmarkRunner, test_db: DatabaseManager):
     """Executa a bateria de benchmark completa e atinge a meta de 86% a 96%."""
-    full_report = runner.run_full_suite()
+    # Modo determinístico com soluções de referência da suíte de teste
+    full_report = runner.run_full_suite(inference_fn=lambda prompt: ("", 0.05, 10))
 
     assert full_report["total_tasks"] >= 8
     assert full_report["total_passed"] >= 7

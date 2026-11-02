@@ -94,12 +94,12 @@ class ForensicSanitizer:
                 evidence_id=ev_id,
                 original_sha256=orig_hash,
                 source_url=f"file://{src_path.name}",
-                custody_status="INVESTIGATIVE_LOCAL_INTACT",
+                custody_status="FULL_BYTES_STORED",
                 derivative_sha256=orig_hash,
                 metadata_stripped=False,
                 stripped_categories="NONE_PRESERVED_FOR_CROSSREF",
                 tool_version="PCI-Investigative-v2.2",
-                drive_sync_status="STRICT_LOCAL_ONLY",
+                drive_sync_status="LOCAL_SPOOL",
             )
 
         return {

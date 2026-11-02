@@ -36,6 +36,7 @@ class TestDatabaseFoundation:
                 "capability_matrix",
                 "tasks_queue",
                 "kudos_ledger",
+                "evidence_manifest",
             }
             assert expected_tables.issubset(set(tables))
 
@@ -187,20 +188,28 @@ class TestDatabaseFoundation:
         assert ledger[0]["kudos_awarded"] == 15.5
         assert ledger[0]["compute_seconds"] == 3.2
 
-    def test_06_database_schema_purity(self, tmp_path):
-        """Valida que o schema da IDE de programacao contem apenas as 4 tabelas de operacao."""
-        db_path = tmp_path / "test_purity.db"
+    def test_06_crud_evidence_manifest(self, tmp_path):
+        """Valida insercao e recuperacao de manifest de custodia / spool cifrado no jobs.db."""
+        db_path = tmp_path / "test_evidence.db"
         db = DatabaseManager(db_path=db_path)
-        with db.get_connection() as conn:
-            tables = [
-                r[0]
-                for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
-            ]
-            assert "evidence_manifest" not in tables
-            assert "tasks_queue" in tables
-            assert "nodes" in tables
-            assert "capability_matrix" in tables
-            assert "kudos_ledger" in tables
+
+        db.register_evidence(
+            evidence_id="EVID_001",
+            original_sha256="abc123originalhash",
+            source_url="spool://relatorio.enc",
+            custody_status="FULL_BYTES_STORED",
+            derivative_sha256="def456cleanhash",
+            metadata_stripped=False,
+            stripped_categories="PRESERVED_INVESTIGATIVE",
+            tool_version="PCI-Engine-v2.3",
+            drive_sync_status="LOCAL_SPOOL",
+        )
+
+        ev = db.get_evidence("EVID_001")
+        assert ev is not None
+        assert ev["original_sha256"] == "abc123originalhash"
+        assert ev["custody_status"] == "FULL_BYTES_STORED"
+        assert ev["drive_sync_status"] == "LOCAL_SPOOL"
 
     def test_07_foreign_key_violation_rejected(self, tmp_path):
         db_path = tmp_path / "test_fk.db"

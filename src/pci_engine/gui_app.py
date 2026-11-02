@@ -1191,7 +1191,7 @@ class PCIMasterGUI:
 
         self.switch_pii = ctk.CTkSwitch(
             opts_frame,
-            text="Se gerar Derivada Externa: Mascarar PII (CPF / CNPJ / Placas / Celulares / E-mails / PIX) apenas na cópia derivada",
+            text="Filtro de Segredos & Redação (LIGADO = Mascarar Dados | DESLIGADO = Preservar 100% Intacto para OSINT)",
             variable=self.remove_pii_var,
             onvalue=True,
             offvalue=False,
@@ -1202,10 +1202,11 @@ class PCIMasterGUI:
 
         self.switch_spool = ctk.CTkSwitch(
             opts_frame,
-            text="Salvar cópia cifrada em data/spool_encrypted/ (Criptografia Fernet AES)",
+            text="Salvar Cópia Trancada em data/spool_encrypted/ (Criptografia Fernet AES com Chave/Senha para o Drive)",
             variable=self.encrypt_spool_var,
             onvalue=True,
             offvalue=False,
+            font=ctk.CTkFont(size=12, weight="bold"),
             progress_color="#00bbf9",
         )
         self.switch_spool.pack(anchor="w", pady=3)
@@ -1215,7 +1216,7 @@ class PCIMasterGUI:
 
         btn_extract_inv = ctk.CTkButton(
             btn_forensic_row,
-            text="◈ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados)",
+            text="❖ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados)",
             command=self._on_extract_investigative_clicked,
             fg_color="#00f5d4",
             text_color="#070a10",
@@ -1226,15 +1227,15 @@ class PCIMasterGUI:
         btn_extract_inv.pack(side="left", padx=(0, 10))
         self._attach_interactive_hover(
             btn_extract_inv,
-            "◈ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados)",
-            "❖ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados) ▸",
+            "❖ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados)",
+            "❖ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados) ➔",
             base_border="#00f5d4",
             hover_border="#ffffff",
         )
 
         btn_generate_derived = ctk.CTkButton(
             btn_forensic_row,
-            text="❖ Gerar Derivada Anonimizada (Para Nuvem/Terceiros)",
+            text="❖ Trancar e Salvar no Spool Cifrado",
             command=self._on_generate_sanitized_derivative,
             fg_color="#162238",
             text_color="#00bbf9",
@@ -1242,13 +1243,32 @@ class PCIMasterGUI:
             height=36,
             font=ctk.CTkFont(size=12, weight="bold"),
         )
-        btn_generate_derived.pack(side="left")
+        btn_generate_derived.pack(side="left", padx=(0, 10))
         self._attach_interactive_hover(
             btn_generate_derived,
-            "❖ Gerar Derivada Anonimizada (Para Nuvem/Terceiros)",
-            "⟡ Gerar Derivada Anonimizada (Para Nuvem/Terceiros) ▸",
+            "❖ Trancar e Salvar no Spool Cifrado",
+            "❖ Trancar e Salvar no Spool Cifrado ➔",
             base_border="#00bbf9",
             hover_border="#00f5d4",
+        )
+
+        btn_sync_drive = ctk.CTkButton(
+            btn_forensic_row,
+            text="❖ Sincronizar Spool com Google Drive",
+            command=self._on_sync_drive_clicked,
+            fg_color="#f77f00",
+            text_color="#070a10",
+            hover_color="#fcbf49",
+            height=36,
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
+        btn_sync_drive.pack(side="left")
+        self._attach_interactive_hover(
+            btn_sync_drive,
+            "❖ Sincronizar Spool com Google Drive",
+            "❖ Sincronizar Spool com Google Drive ➔",
+            base_border="#f77f00",
+            hover_border="#ffffff",
         )
 
         self.sanitizer_output_box = ctk.CTkTextbox(

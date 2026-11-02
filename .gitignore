@@ -52,3 +52,4 @@ Thumbs.db
 
 config/*.secret
 config/broker_token.secret
+config/*.key
