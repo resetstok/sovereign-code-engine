@@ -1,6 +1,7 @@
 """
 Módulo: pci_engine/broker_api.py
-Servidor FastAPI local (Tailscale) para Pull & Lease de Nós Doadores.
+Servidor FastAPI local (Tailscale VPN) para Pull & Lease de Nós Doadores da arquitetura PCI Master v2.0/v2.1.
+Permite pull assíncrono de tarefas, validação em sandbox Git Worktree e livro-razão de Kudos.
 """
 
 from __future__ import annotations
@@ -10,20 +11,29 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
-from pci_engine.db import JobsDatabaseV2
-from pci_engine.router import PCIRouterAndBroker
+from pci_engine.database import DatabaseManager
+from pci_engine.preflight import PreflightChecker
+from pci_engine.router import PCIRouter
 
 app = FastAPI(
     title="Sovereign Code Engine - Broker API v2.0",
-    description="Interface segura de Pull/Lease para nós doadores via Tailscale VPN.",
+    description="Interface de Pull/Lease para nós doadores via rede privada Tailscale.",
     version="2.0.0",
 )
 
-db_path = Path("data/jobs.db")
-broker = PCIRouterAndBroker(db_path=db_path)
+DB_PATH = Path("data/jobs.db")
+REPO_ROOT = Path(".").resolve()
+
+
+def get_db() -> DatabaseManager:
+    return DatabaseManager(db_path=DB_PATH)
+
+
+def get_router() -> PCIRouter:
+    return PCIRouter(db_path=DB_PATH, repo_root=REPO_ROOT)
 
 
 class RegisterNodeRequest(BaseModel):
@@ -49,41 +59,50 @@ class SubmissionRequest(BaseModel):
 
 
 @app.get("/health")
-def get_health():
-    health = broker.check_master_health()
+def get_health(response: Response):
+    """Audita a integridade física do nó mestre. Aborta se SSD estiver abaixo de 40GB."""
+    health = PreflightChecker.check_health(REPO_ROOT)
+    if health.get("ssd_critical"):
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "status": "BLOCKED_EXTERNAL",
+            "detail": "SSD do Master abaixo de 40GB. Operações pausadas para proteção física.",
+            "master_health": health,
+        }
     return {"status": "HEALTHY", "master_health": health}
 
 
 @app.post("/nodes/register")
 def register_node(req: RegisterNodeRequest):
-    with broker._get_conn() as conn:
-        now = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO nodes (
-                node_id, node_name, role, ram_total_mb, vram_total_mb,
-                ssd_free_gb, supported_models, status, last_heartbeat
-            ) VALUES (?, ?, 'DONOR', ?, ?, ?, ?, 'ONLINE', ?)
-            """,
-            (
-                req.node_id,
-                req.node_name,
-                req.ram_total_mb,
-                req.vram_total_mb,
-                req.ssd_free_gb,
-                json.dumps(req.supported_models),
-                now,
-            ),
-        )
-        conn.commit()
+    """Cadastra ou atualiza o nó doador no livro-razão da rede."""
+    db = get_db()
+    db.register_node(
+        node_id=req.node_id,
+        node_name=req.node_name,
+        role="DONOR",
+        ram_total_mb=req.ram_total_mb,
+        vram_total_mb=req.vram_total_mb,
+        ssd_free_gb=req.ssd_free_gb,
+        supported_models=req.supported_models,
+        status="ONLINE",
+    )
     return {"status": "REGISTERED", "node_id": req.node_id}
 
 
 @app.post("/nodes/heartbeat")
 def node_heartbeat(req: HeartbeatRequest):
-    with broker._get_conn() as conn:
-        now = datetime.now(timezone.utc).isoformat()
-        res = conn.execute(
+    """Atualiza o batimento cardíaco e status de conectividade do nó."""
+    db = get_db()
+    node = db.get_node(req.node_id)
+    if not node:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nó não encontrado. Registre-se primeiro via /nodes/register.",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    with db.get_connection() as conn:
+        conn.execute(
             """
             UPDATE nodes
             SET status = ?, last_heartbeat = ?
@@ -92,14 +111,18 @@ def node_heartbeat(req: HeartbeatRequest):
             (req.status, now, req.node_id),
         )
         conn.commit()
-        if res.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Nó não encontrado. Registre-se primeiro.")
+
     return {"status": "HEARTBEAT_ACK", "timestamp": now}
 
 
 @app.get("/tasks/lease")
-def lease_task(node_id: str = Query(..., description="ID do nó doador autenticado")):
-    task = broker.lease_task_for_donor(donor_node_id=node_id, lease_minutes=45)
+def lease_task(node_id: str = Query(..., description="ID do nó doador cadastrado")):
+    """
+    Entrega a próxima tarefa elegível (PUBLIC ou SANITIZED_DERIVATIVE) para o doador,
+    travando um lease de 45 minutos no jobs.db.
+    """
+    router = get_router()
+    task = router.lease_task_for_donor(donor_node_id=node_id, lease_minutes=45)
     if not task:
         raise HTTPException(
             status_code=status.HTTP_204_NO_CONTENT,
@@ -110,22 +133,47 @@ def lease_task(node_id: str = Query(..., description="ID do nó doador autentica
 
 @app.post("/tasks/{task_id}/submit")
 def submit_task(task_id: str, req: SubmissionRequest):
-    success = broker.verify_and_integrate_submission(
+    """
+    Recebe a submissão de código gerado pelo nó doador e valida em sandbox isolado
+    via Git Worktree (nanocoder pattern). Se passar no Pytest, bonifica Kudos.
+    """
+    router = get_router()
+    success = router.verify_and_integrate_submission(
         task_id=task_id,
         node_id=req.node_id,
         candidate_code=req.candidate_code,
         compute_sec=req.compute_seconds,
     )
     if success:
-        return {"status": "VERIFIED_AND_INTEGRATED", "task_id": task_id, "awarded": True}
+        return {
+            "status": "VERIFIED_AND_INTEGRATED",
+            "task_id": task_id,
+            "awarded": True,
+        }
     else:
-        return {"status": "TEST_FAILED_RETRYING", "task_id": task_id, "awarded": False}
+        return {
+            "status": "TEST_FAILED_RETRYING",
+            "task_id": task_id,
+            "awarded": False,
+        }
 
 
 @app.get("/kudos/{node_id}")
 def get_kudos(node_id: str):
-    with broker._get_conn() as conn:
-        row = conn.execute("SELECT kudos_balance FROM nodes WHERE node_id = ?", (node_id,)).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Nó não cadastrado.")
-        return {"node_id": node_id, "kudos_balance": row["kudos_balance"]}
+    """Retorna o saldo total de Kudos e o histórico de transações de computação do nó doador."""
+    db = get_db()
+    node = db.get_node(node_id)
+    if not node:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nó doador não cadastrado.",
+        )
+
+    ledger = db.get_kudos_ledger_for_node(node_id)
+    return {
+        "node_id": node_id,
+        "node_name": node["node_name"],
+        "kudos_balance": node["kudos_balance"],
+        "transactions_count": len(ledger),
+        "history": ledger[:20],
+    }
