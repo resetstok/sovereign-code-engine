@@ -2675,15 +2675,27 @@ class PCIMasterGUI:
 
         btn_run_arch = ctk.CTkButton(
             top_ctrl,
-            text="▶ Executar /architect",
+            text="▶ Planejar (/architect)",
             command=self._on_run_aider_architect_clicked,
             fg_color="#00f5d4",
             text_color="#070a10",
             hover_color="#00bbf9",
             font=ctk.CTkFont(size=11, weight="bold"),
-            width=160,
+            width=150,
         )
-        btn_run_arch.pack(side="right")
+        btn_run_arch.pack(side="right", padx=(4, 0))
+
+        btn_run_code = ctk.CTkButton(
+            top_ctrl,
+            text="⚡ Executar (/code)",
+            command=self._on_run_aider_code_clicked,
+            fg_color="#f77f00",
+            text_color="#070a10",
+            hover_color="#fcbf49",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            width=140,
+        )
+        btn_run_code.pack(side="right", padx=(4, 0))
 
         self.aider_output_box = ctk.CTkTextbox(
             action_box,
@@ -2737,6 +2749,27 @@ class PCIMasterGUI:
             self.log(f"Falha ao gravar Hard Wallet: {e}")
             if not self.headless_test:
                 messagebox.showerror("Erro", f"Falha ao gravar chave: {e}")
+
+    def _on_run_aider_code_clicked(self) -> None:
+        prompt = self.aider_prompt_entry.get().strip()
+        if not prompt:
+            prompt = "Aplique a refatoracao incremental no arquivo mantendo compatibilidade e testes passando."
+
+        self.log(f"Disparando Aider em modo /code: {prompt[:60]}...")
+        self.aider_output_box.delete("1.0", "end")
+        self.aider_output_box.insert("1.0", f"[AIDER RUNNING] Executando /code (--no-auto-commits)...\nComando: {prompt}\n\n")
+
+        def _worker():
+            res = self.aider_runner.run_surgical_code(files=[], instruction=prompt)
+            out = res.get("output") or res.get("error", "Sem saida registrada.")
+            def _ui():
+                self.aider_output_box.delete("1.0", "end")
+                self.aider_output_box.insert("1.0", out)
+                self.log("Aider concluiu execucao de codigo.")
+            self.dispatch_to_ui(_ui)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_run_aider_architect_clicked(self) -> None:
         prompt = self.aider_prompt_entry.get().strip()
