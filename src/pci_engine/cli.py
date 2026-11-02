@@ -115,14 +115,47 @@ def launch_aider(target_files: list[str]):
     subprocess.run(cmd, cwd=str(REPO_ROOT))
 
 
+def launch_micro_harness(task_id: str):
+    print("=" * 65)
+    print(f" [PCI MICRO-HARNESS v2.1] EXECUÇÃO CIRÚRGICA DA TAREFA: {task_id}")
+    print("=" * 65)
+    from pci_engine.micro_harness import MicroHarness
+    db = JobsDatabaseV2(REPO_ROOT / "data" / "jobs.db")
+    with db.get_connection() as conn:
+        task = conn.execute("SELECT * FROM tasks_queue WHERE task_id = ?", (task_id,)).fetchone()
+        if not task:
+            print(f"Erro: Tarefa {task_id} não encontrada na fila.")
+            return
+
+    harness = MicroHarness(repo_root=REPO_ROOT)
+    res = harness.execute_task_cycle(
+        task_id=task_id,
+        spec_markdown=task["spec_markdown"],
+        test_code=task["test_code"],
+        target_file_path=task["target_file_path"],
+    )
+
+    if res["success"]:
+        print(f"\n>>> SUCESSO! Tarefa {task_id} concluída em {res['attempts']} tentativa(s).")
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks_queue SET status = 'VERIFIED', candidate_patch_diff = ? WHERE task_id = ?",
+                (res["code"], task_id),
+            )
+            conn.commit()
+    else:
+        print(f"\n>>> FALHA na execução da tarefa: {res.get('last_error')}")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Sovereign Code Engine v2.0 - CLI")
+    parser = argparse.ArgumentParser(description="Sovereign Code Engine v2.1 - CLI")
     parser.add_argument("--status", action="store_true", help="Audita status físico e da fila v2.0")
     parser.add_argument("--clean-ram", action="store_true", help="Libera memória RAM fechando abas ociosas")
     parser.add_argument("--route", action="store_true", help="Executa ciclo de decisão e despacho do roteador")
     parser.add_argument("--start-broker", action="store_true", help="Inicia API FastAPI para nós doadores (Tailscale)")
     parser.add_argument("--run-nightly", action="store_true", help="Dispara processamento noturno Colibrì")
     parser.add_argument("--aider", nargs="+", metavar="ARQUIVO", help="Dispara Aider com TDD nos arquivos passados")
+    parser.add_argument("--run-harness", metavar="TASK_ID", help="Executa tarefa com MicroHarness ultraleve (<1k tokens)")
     args = parser.parse_args()
 
     if args.clean_ram:
@@ -136,6 +169,8 @@ def main():
         worker.execute_batch()
     elif args.aider:
         launch_aider(args.aider)
+    elif args.run_harness:
+        launch_micro_harness(args.run_harness)
     else:
         check_status()
         print("\nComandos disponíveis:")
