@@ -43,6 +43,7 @@ from pci_engine.preflight import PreflightChecker
 from pci_engine.ram_liberator import RAMLiberator
 from pci_engine.router import PCIRouter
 from pci_engine.sanitizer import ForensicSanitizer
+from pci_engine.workspace_bridge import WorkspaceBridge, ExportReceipt
 
 # Configuração visual global CustomTkinter
 ctk.set_appearance_mode("Dark")
@@ -129,6 +130,13 @@ class PCIMasterGUI:
         self.task_filter_var = tk.StringVar(value="Todas")
         self.selected_provider_var = tk.StringVar(value="Google Gemini")
         self._broker_process: Optional[subprocess.Popen] = None
+
+        # Workspace Ativo (Ponte Multi-Projetos para SESAU, Nexus, LicitAI, etc.)
+        default_target_ws = Path(r"C:\Lab\012 - Auditoria (SESAU)")
+        if not default_target_ws.exists():
+            default_target_ws = self.repo_root
+        self.target_workspace_var = tk.StringVar(value=str(default_target_ws))
+        self.workspace_bridge = WorkspaceBridge(default_target_ws)
 
         # Variáveis de texto reativas para telemetria na barra lateral
         self.ram_text_var = tk.StringVar(value="RAM: Inicializando...")
@@ -359,6 +367,79 @@ class PCIMasterGUI:
         )
 
         # ---------------------------------------------------------------------
+        # PROJETO / WORKSPACE ALVO (Ponte Multi-Projetos para SESAU, Nexus, etc.)
+        # ---------------------------------------------------------------------
+        ws_frame = ctk.CTkFrame(
+            self.sidebar,
+            corner_radius=10,
+            fg_color="#0f1726",
+            border_width=1,
+            border_color="#1b2840",
+        )
+        ws_frame.pack(padx=14, pady=(8, 4), fill="x")
+
+        ctk.CTkLabel(
+            ws_frame,
+            text="📁 Projeto / Workspace Alvo:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#00f5d4",
+        ).pack(padx=12, pady=(8, 2), anchor="w")
+
+        ws_input_row = ctk.CTkFrame(ws_frame, fg_color="transparent")
+        ws_input_row.pack(padx=10, pady=(2, 6), fill="x")
+
+        self.lbl_active_ws = ctk.CTkLabel(
+            ws_input_row,
+            textvariable=self.target_workspace_var,
+            font=ctk.CTkFont(family="Consolas", size=9),
+            text_color="#94a3b8",
+            anchor="w",
+            wraplength=170,
+            justify="left",
+        )
+        self.lbl_active_ws.pack(side="left", fill="x", expand=True)
+
+        btn_select_ws = ctk.CTkButton(
+            ws_input_row,
+            text="📂",
+            width=32,
+            height=26,
+            fg_color="#162238",
+            hover_color="#00f5d4",
+            text_color="#ffffff",
+            font=ctk.CTkFont(size=12),
+            command=self._on_choose_target_workspace_clicked,
+        )
+        btn_select_ws.pack(side="right", padx=(4, 0))
+
+        ws_btn_row = ctk.CTkFrame(ws_frame, fg_color="transparent")
+        ws_btn_row.pack(padx=10, pady=(0, 8), fill="x")
+
+        btn_open_ws_folder = ctk.CTkButton(
+            ws_btn_row,
+            text="Abrir Pasta",
+            height=24,
+            fg_color="#132238",
+            hover_color="#1f3657",
+            text_color="#00bbf9",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=self._on_open_target_workspace_folder_clicked,
+        )
+        btn_open_ws_folder.pack(side="left", expand=True, fill="x", padx=(0, 2))
+
+        btn_git_sync = ctk.CTkButton(
+            ws_btn_row,
+            text="Git Prep & Sync",
+            height=24,
+            fg_color="#1c1624",
+            hover_color="#3c1c38",
+            text_color="#ffbe0b",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=self._on_git_sync_clicked,
+        )
+        btn_git_sync.pack(side="right", expand=True, fill="x", padx=(2, 0))
+
+        # ---------------------------------------------------------------------
         # COFRE E SELETOR DE CHAVES DE API (Substitui a caixa preta solta)
         # ---------------------------------------------------------------------
         api_vault_frame = ctk.CTkFrame(
@@ -581,6 +662,7 @@ class PCIMasterGUI:
         top_bar.grid_columnconfigure(0, weight=1)
         top_bar.grid_columnconfigure(1, weight=0)
         top_bar.grid_columnconfigure(2, weight=0)
+        top_bar.grid_columnconfigure(3, weight=0)
 
         ctk.CTkLabel(
             top_bar,
@@ -600,13 +682,33 @@ class PCIMasterGUI:
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_load_masterbook_file,
         )
-        btn_load_md.grid(row=0, column=1, padx=(8, 6), sticky="e")
+        btn_load_md.grid(row=0, column=1, padx=(8, 4), sticky="e")
         self._attach_interactive_hover(
             btn_load_md,
             "◈ Carregar Arquivo .MD",
             "❖ Carregar Arquivo .MD ▸",
             base_border="#00bbf9",
             hover_border="#ffffff",
+        )
+
+        btn_inject_context = ctk.CTkButton(
+            top_bar,
+            text="🔍 Injetar Contexto do Projeto",
+            width=190,
+            height=28,
+            fg_color="#14213d",
+            hover_color="#1f3657",
+            text_color="#00f5d4",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._on_inject_workspace_context_clicked,
+        )
+        btn_inject_context.grid(row=0, column=2, padx=4, sticky="e")
+        self._attach_interactive_hover(
+            btn_inject_context,
+            "🔍 Injetar Contexto do Projeto",
+            "❖ Injetar Contexto do Projeto ▸",
+            base_border="#1b2840",
+            hover_border="#00f5d4",
         )
 
         btn_open_web_hud = ctk.CTkButton(
@@ -620,7 +722,7 @@ class PCIMasterGUI:
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_open_web_triquetra_hud,
         )
-        btn_open_web_hud.grid(row=0, column=2, sticky="e")
+        btn_open_web_hud.grid(row=0, column=3, padx=(4, 0), sticky="e")
         self._attach_interactive_hover(
             btn_open_web_hud,
             "❖ Abrir HUD Web (SVG)",
@@ -892,6 +994,10 @@ class PCIMasterGUI:
         self.task_context_menu.add_command(
             label="◈ Ver Código Patch / Especificação",
             command=self._on_ctx_view_patch,
+        )
+        self.task_context_menu.add_command(
+            label="📦 Exportar Código para o Projeto Alvo",
+            command=self._on_ctx_export_task_to_workspace,
         )
         self.task_context_menu.add_separator()
         self.task_context_menu.add_command(
@@ -1934,6 +2040,100 @@ class PCIMasterGUI:
             f"--- CÓDIGO / PATCH GERADO ---\n{patch_txt}\n\n"
             f"--- ÚLTIMO LOG DO PYTEST ---\n{err_txt}\n",
         )
+
+    def _on_choose_target_workspace_clicked(self) -> None:
+        """Permite ao operador apontar para a pasta de qualquer projeto no disco (ex: C:\\Lab\\012 - Auditoria (SESAU))."""
+        chosen = filedialog.askdirectory(
+            title="Selecionar Pasta Principal do Projeto Alvo",
+            initialdir=self.target_workspace_var.get(),
+        )
+        if chosen:
+            self.target_workspace_var.set(chosen)
+            self.workspace_bridge.set_target_workspace(chosen)
+            mf = self.workspace_bridge.scan_workspace_tree()
+            self.log(
+                f"📁 Workspace Alvo alterado para: {Path(chosen).name} "
+                f"({len(mf.relative_files)} arquivos mapeados | Git branch: {mf.git_branch or 'N/A'})."
+            )
+
+    def _on_open_target_workspace_folder_clicked(self) -> None:
+        """Abre a pasta do projeto alvo no Windows Explorer."""
+        target_dir = Path(self.target_workspace_var.get())
+        if target_dir.exists():
+            os.startfile(str(target_dir))
+            self.log(f"Pasta do projeto aberta no Windows Explorer: {target_dir}")
+        else:
+            messagebox.showwarning("Aviso", f"A pasta não existe: {target_dir}")
+
+    def _on_inject_workspace_context_clicked(self) -> None:
+        """Lê a estrutura do projeto alvo e injeta um resumo limpo no Masterbook para guiar a IA."""
+        summary = self.workspace_bridge.build_project_context_summary()
+        current_text = self.txt_masterbook.get("1.0", "end").strip()
+        context_block = f"\n\n### CONTEXTO DO PROJETO ALVO ({Path(self.target_workspace_var.get()).name}):\n{summary}\n"
+        self.txt_masterbook.insert("end", context_block)
+        self.txt_masterbook.see("end")
+        self.log(f"Contexto do projeto '{Path(self.target_workspace_var.get()).name}' injetado no Masterbook.")
+
+    def _on_ctx_export_task_to_workspace(self) -> None:
+        """Exporta o código de uma tarefa VERIFIED diretamente para a pasta do projeto alvo."""
+        task_id = self._get_selected_task_id()
+        if not task_id:
+            return
+        t = self.db.get_task(task_id)
+        if not t or t["status"] != "VERIFIED":
+            messagebox.showwarning("Aviso", "Apenas tarefas com status VERIFIED podem ser exportadas.")
+            return
+
+        code = t.get("candidate_patch_diff")
+        if not code:
+            messagebox.showwarning("Aviso", "Nenhum código gerado disponível para esta tarefa.")
+            return
+
+        receipt = self.workspace_bridge.export_verified_task_code(
+            task_id=task_id,
+            target_relative_path=t["target_file_path"],
+            code_content=code,
+            spec_summary=t["spec_markdown"],
+            pytest_log=t.get("last_error_log") or "(Sem erros)",
+            auto_stage_git=True,
+        )
+        self.log(
+            f"📦 [EXPORTADO] {task_id} -> {receipt.files_written[0]} "
+            f"(Diário de auditoria atualizado em {Path(receipt.journal_path).name})."
+        )
+        messagebox.showinfo(
+            "Exportação Concluída com Sucesso",
+            f"O código da tarefa {task_id} foi gravado com sucesso no projeto:\n\n"
+            f"📁 Arquivo: {receipt.files_written[0]}\n"
+            f"📜 Diário de Auditoria: {receipt.journal_path}\n\n"
+            f"O arquivo já está preparado e pronto para uso no projeto e para envio ao GitHub!",
+        )
+
+    def _on_git_sync_clicked(self) -> None:
+        """Prepara commit e sincronização com o GitHub para o projeto alvo."""
+        def _run() -> None:
+            self.log(f"Iniciando verificação de Git para '{Path(self.target_workspace_var.get()).name}'...")
+            res = self.workspace_bridge.prepare_git_commit_and_push_bundle(
+                commit_message="feat(offline): sovereign code engine verified module export",
+                push_now=False,
+            )
+            if res.get("success"):
+                out_msg = res.get("commit_output") or res.get("message", "Commit preparado com sucesso.")
+                self.log(f"✓ [GIT PREP] {out_msg}")
+                self.dispatch_to_ui(
+                    lambda: messagebox.showinfo(
+                        "Git Preparado com Sucesso",
+                        f"Arquivos do projeto preparados para Git!\n\n"
+                        f"{out_msg}\n\n"
+                        f"O código gerado offline está registrado e sem conflitos, pronto para push ou leitura pelo Antigravity / Copilot.",
+                    )
+                )
+            else:
+                err_msg = res.get("error", "Erro desconhecido")
+                self.log(f"⌧ [GIT PREP] {err_msg}")
+                self.dispatch_to_ui(lambda: messagebox.showwarning("Git", f"Aviso de Git:\n{err_msg}"))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _on_ctx_delete_task(self) -> None:
         task_id = self._get_selected_task_id()
