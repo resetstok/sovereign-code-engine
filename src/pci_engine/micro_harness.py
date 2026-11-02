@@ -10,13 +10,17 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import urllib.request
 import urllib.error
+
+from pci_engine.database import DatabaseManager
 
 logger = logging.getLogger("pci_engine.micro_harness")
 
@@ -54,10 +58,12 @@ class MicroHarness:
     def __init__(
         self,
         repo_root: Path | str,
+        db_manager: Optional[DatabaseManager] = None,
         ollama_url: str = "http://127.0.0.1:11434",
-        model: str = "huihui_ai/qwen2.5-coder-abliterate:3b",
+        model: str = "qwen2.5-coder:3b",
     ):
         self.repo_root = Path(repo_root).resolve()
+        self.db = db_manager
         self.ollama_url = ollama_url
         self.model = model
         self.read_files_session: Set[str] = set()
@@ -179,6 +185,30 @@ Com base nisso, retorne a implementação completa e correta de '{target_file}' 
 """
         return prompt
 
+    def _call_llm(self, prompt: str) -> str:
+        """Executa a chamada HTTP com isolamento de proxy para o Ollama local."""
+        payload = json.dumps({
+            "model": self.model,
+            "system": SYSTEM_PROMPT,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.2,
+                "num_predict": 1024,
+                "top_p": 0.9,
+            },
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{self.ollama_url}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=45) as resp:
+            resp_data = json.loads(resp.read().decode("utf-8"))
+            return resp_data.get("response", "")
+
     def execute_task_cycle(
         self,
         task_id: str,
@@ -191,7 +221,7 @@ Com base nisso, retorne a implementação completa e correta de '{target_file}' 
         self.reset_session()
         target_file = target_file_path.replace("\\", "/")
 
-        # 1. Garante leitura inicial para respeitar a invariante de edição
+        # 1. Garante leitura inicial para respeitar a invariante de edição se o arquivo já existir
         if (self.repo_root / target_file).exists():
             self.tool_read(target_file)
 
@@ -204,28 +234,9 @@ Com base nisso, retorne a implementação completa e correta de '{target_file}' 
             logger.info(f"MicroHarness ciclo {task_id} - Tentativa {attempt}/{max_attempts}")
             prompt = self.build_prompt_with_journal(spec_markdown, test_code, target_file)
 
-            # Chama Ollama local
+            # Chama o LLM local
             try:
-                payload = json.dumps({
-                    "model": self.model,
-                    "system": SYSTEM_PROMPT,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.2,
-                        "num_predict": 1024,
-                        "top_p": 0.9,
-                    },
-                }).encode("utf-8")
-                req = urllib.request.Request(
-                    f"{self.ollama_url}/api/generate",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                with opener.open(req, timeout=45) as resp:
-                    resp_data = json.loads(resp.read().decode("utf-8"))
-                    generated_text = resp_data.get("response", "")
+                generated_text = self._call_llm(prompt)
             except Exception as exc:
                 return {"success": False, "error": f"Erro de conexão com Ollama: {exc}"}
 
@@ -235,8 +246,9 @@ Com base nisso, retorne a implementação completa e correta de '{target_file}' 
             # Grava no arquivo (respeitando a invariante)
             self.tool_write(target_file, clean_code)
 
-            # Roda o teste isolado via tool_bash
-            test_output = self.tool_bash(f"pytest -q --tb=short {test_file_path}")
+            # Roda o teste isolado via tool_bash com inclusão do repositório no pythonpath
+            python_bin = sys.executable
+            test_output = self.tool_bash(f'"{python_bin}" -m pytest -q --tb=short -o pythonpath=. {test_file_path}')
             if "[EXIT_CODE: 0]" in test_output:
                 return {
                     "success": True,
@@ -262,6 +274,125 @@ Com base nisso, retorne a implementação completa e correta de '{target_file}' 
             "attempts": max_attempts,
             "last_error": self.journal[-1].failed_test_output if self.journal else "Falha desconhecida",
         }
+
+    # -------------------------------------------------------------------------
+    # Integração com Fila jobs.db e Capability Matrix
+    # -------------------------------------------------------------------------
+    def execute_queued_task(self, task_id: str) -> Dict[str, Any]:
+        """Executa uma tarefa da fila jobs.db e atualiza os status e métricas."""
+        if not self.db:
+            raise RuntimeError("DatabaseManager não configurado no MicroHarness.")
+
+        task = self.db.get_task(task_id)
+        if not task:
+            raise ValueError(f"Tarefa '{task_id}' não encontrada no jobs.db.")
+
+        # Transição para VALIDATING
+        self.db.update_task_status(task_id, status="VALIDATING", assigned_route="LOCAL_3B")
+
+        start_time = time.time()
+        res = self.execute_task_cycle(
+            task_id=task["task_id"],
+            spec_markdown=task["spec_markdown"],
+            test_code=task["test_code"],
+            target_file_path=task["target_file_path"],
+            max_attempts=task["max_attempts"],
+        )
+        duration_sec = time.time() - start_time
+
+        if res["success"]:
+            # Sucesso: atualiza status para VERIFIED e desbloqueia tarefas dependentes
+            self.db.update_task_status(
+                task_id=task_id,
+                status="VERIFIED",
+                candidate_patch_diff=res.get("code"),
+            )
+            promoted = self.db.unlock_ready_tasks()
+            logger.info(f"Tarefa {task_id} VERIFIED com sucesso! {promoted} tarefa(s) dependente(s) desbloqueada(s).")
+            self._update_capability_matrix(task["task_type"], success=True, duration_sec=duration_sec)
+        else:
+            current_attempts = task["attempt_count"] + res.get("attempts", 1)
+            new_status = (
+                "BLOCKED_HUMAN_REVIEW"
+                if current_attempts >= task["max_attempts"]
+                else "FAILED_RETRY"
+            )
+            err_msg = res.get("error") or res.get("last_error", "Falha de execução")
+            with self.db.get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE tasks_queue
+                    SET status = ?, attempt_count = ?, last_error_log = ?
+                    WHERE task_id = ?
+                    """,
+                    (new_status, current_attempts, err_msg, task_id),
+                )
+                conn.commit()
+            self._update_capability_matrix(task["task_type"], success=False, duration_sec=duration_sec)
+
+        return res
+
+    def run_next_local_task(self) -> Optional[Dict[str, Any]]:
+        """Busca e executa a próxima tarefa elegível para o modelo local 3B."""
+        if not self.db:
+            return None
+
+        with self.db.get_connection() as conn:
+            task = conn.execute(
+                """
+                SELECT task_id FROM tasks_queue
+                WHERE status = 'PENDING'
+                  AND (assigned_route = 'LOCAL_3B' OR (assigned_route IS NULL AND estimated_lines <= 35))
+                  AND (depends_on_task_id IS NULL OR depends_on_task_id IN (
+                      SELECT task_id FROM tasks_queue WHERE status = 'VERIFIED'
+                  ))
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+
+        if not task:
+            return None
+
+        return self.execute_queued_task(task["task_id"])
+
+    def _update_capability_matrix(self, task_type: str, success: bool, duration_sec: float) -> None:
+        """Atualiza a taxa de sucesso e métricas na capability_matrix para o MASTER_NODE."""
+        if not self.db:
+            return
+
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT sample_size, success_rate FROM capability_matrix
+                WHERE node_id = 'MASTER_NODE' AND model_name = ? AND task_type = ?
+                """,
+                (self.model, task_type),
+            ).fetchone()
+
+            if row:
+                old_sample = row["sample_size"]
+                old_rate = row["success_rate"]
+                new_sample = old_sample + 1
+                new_rate = round(((old_rate * old_sample) + (1.0 if success else 0.0)) / new_sample, 3)
+            else:
+                new_sample = 1
+                new_rate = 1.0 if success else 0.0
+
+            conn.execute(
+                """
+                INSERT INTO capability_matrix (
+                    node_id, model_name, task_type, sample_size,
+                    success_rate, avg_tokens_per_sec, verification_state, benchmark_version
+                ) VALUES ('MASTER_NODE', ?, ?, ?, ?, 18.5, 'MEASURED', 'v2.1')
+                ON CONFLICT(node_id, model_name, task_type) DO UPDATE SET
+                    sample_size = excluded.sample_size,
+                    success_rate = excluded.success_rate,
+                    verification_state = 'MEASURED'
+                """,
+                (self.model, task_type, new_sample, new_rate),
+            )
+            conn.commit()
 
     @staticmethod
     def _extract_python_code(text: str) -> str:

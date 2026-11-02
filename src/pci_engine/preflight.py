@@ -29,6 +29,22 @@ class PreflightChecker:
     VRAM_MAX_USAGE_MB = 3800.0
 
     @classmethod
+    def check_health(cls, target_path: Path | str = ".") -> Dict[str, Any]:
+        """Agrega storage, RAM e GPU em um relatório consolidado de integridade."""
+        disk = psutil.disk_usage(str(target_path))
+        disk_free = round(disk.free / (1024**3), 2)
+        ram_info = cls.check_ram()
+        gpu_info = cls.check_gpu()
+        return {
+            "ssd_free_gb": disk_free,
+            "ssd_critical": disk_free < cls.SSD_MIN_FREE_GB_ABORT,
+            "ram_free_mb": ram_info["ram_available_mb"],
+            "ram_total_mb": ram_info["ram_total_mb"],
+            "can_run_local_3b": ram_info["can_run_local_3b"],
+            "gpu": gpu_info,
+        }
+
+    @classmethod
     def check_storage(cls, target_path: Path | str = "/", min_free_gb: float = SSD_MIN_FREE_GB_ABORT) -> float:
         """
         Verifica o espaço livre no disco. Se for menor que min_free_gb (padrão 40.0 GB),

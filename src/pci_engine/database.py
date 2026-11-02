@@ -344,6 +344,27 @@ class DatabaseManager:
             )
             conn.commit()
 
+    def unlock_ready_tasks(self) -> int:
+        """
+        Promove tarefas de 'WAITING_DEPS' para 'PENDING' cujas dependências
+        já estejam com status 'VERIFIED'.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE tasks_queue
+                SET status = 'PENDING'
+                WHERE status = 'WAITING_DEPS'
+                  AND depends_on_task_id IN (
+                      SELECT task_id FROM tasks_queue WHERE status = 'VERIFIED'
+                  )
+                """
+            )
+            promoted = cursor.rowcount
+            conn.commit()
+            return promoted
+
     # -------------------------------------------------------------------------
     # CRUD: 4. LIVRO-RAZÃO DE KUDOS (Kudos Ledger)
     # -------------------------------------------------------------------------

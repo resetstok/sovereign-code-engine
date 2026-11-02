@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -279,7 +280,7 @@ class PCIRouter:
             test_file.write_text(test_code, encoding="utf-8")
 
             res = subprocess.run(
-                ["pytest", "-q", "--tb=short", "--disable-warnings", str(test_file)],
+                [sys.executable, "-m", "pytest", "-q", "--tb=short", "--disable-warnings", str(test_file)],
                 cwd=str(worktree_dir),
                 capture_output=True,
                 text=True,
@@ -308,7 +309,7 @@ class PCIRouter:
 
             try:
                 res = subprocess.run(
-                    ["pytest", "-q", "--tb=short", "--disable-warnings", str(test_file)],
+                    [sys.executable, "-m", "pytest", "-q", "--tb=short", "--disable-warnings", str(test_file)],
                     cwd=tmpdir,
                     capture_output=True,
                     text=True,
