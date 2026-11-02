@@ -1,48 +1,50 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
+# =============================================================================
+# Sovereign Code Engine (PCI Master System v2.0 / v2.1) - .gitignore
+# Regras rígidas de blindagem: proíbe bancos com histórico, PII, chaves e binários
+# =============================================================================
+
+# Ignorar banco de dados local e logs
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*-wal
+data/*-shm
+data/spool_encrypted/*
+data/sandboxes/*
+data/sanitized_derivatives/*
+*.db
+*.sqlite
+*.sqlite3
+
+# Ignorar executáveis, builds e sandbox
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+*.exe
+*.spec
+pci_sandbox_*/
+pci_worker_workspace/
+
+# Ignorar chaves de API e arquivos de ambiente
+.env
+.env.*
+config/routing_policy_private.json
+
+# Python padrão
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 .pytest_cache/
 .coverage
 htmlcov/
-
-# Ambientes Virtuais
+*.log
+logs/
 .venv/
 venv/
 ENV/
 
-# Bancos de Dados Locais e Checkpoints
-*.db
-*.sqlite3
-data/jobs.db
-
-# Logs e Temporários
-*.log
-logs/
-.aider*
-!.aider.conf.yml
-
-# IDEs
+# IDEs e Sistema Operacional
 .vscode/
 .idea/
-*.swp
-*.swo
+.DS_Store
+Thumbs.db
