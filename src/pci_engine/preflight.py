@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -78,17 +79,24 @@ class PreflightChecker:
 
     @classmethod
     def check_gpu(cls) -> Dict[str, Any]:
-        """Consulta métricas da GPU NVIDIA diretamente via nvidia-smi sem dependências pesadas."""
+        """Consulta métricas da GPU NVIDIA diretamente via nvidia-smi sem piscar janela no Windows."""
         try:
+            kwargs: Dict[str, Any] = {
+                "capture_output": True,
+                "text": True,
+                "timeout": 5,
+            }
+            if sys.platform == "win32":
+                # Evita que o Windows crie e pisque janelas de console na tela a cada chamada
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
             res = subprocess.run(
                 [
                     "nvidia-smi",
                     "--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu",
                     "--format=csv,noheader,nounits",
                 ],
-                capture_output=True,
-                text=True,
-                timeout=5,
+                **kwargs,
             )
             if res.returncode == 0 and res.stdout.strip():
                 parts = [x.strip() for x in res.stdout.strip().split(",")]
@@ -172,9 +180,12 @@ class PreflightChecker:
         except Exception:
             pass
 
-        # 2. Fallback via linha de comando ollama list
+        # 2. Fallback via linha de comando ollama list sem piscar console
         try:
-            res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
+            kwargs: Dict[str, Any] = {"capture_output": True, "text": True, "timeout": 5}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            res = subprocess.run(["ollama", "list"], **kwargs)
             if res.returncode == 0:
                 models = []
                 lines = res.stdout.strip().splitlines()

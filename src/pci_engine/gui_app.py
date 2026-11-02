@@ -679,10 +679,10 @@ class PCIMasterGUI:
                     ram_pct = vm.percent
 
                     # 2. VRAM da GPU NVIDIA
-                    gpu = PreflightChecker.get_gpu_info()
+                    gpu = PreflightChecker.check_gpu()
                     if gpu.get("available"):
-                        vram_used = gpu.get("vram_used_mb", 0)
-                        vram_total = gpu.get("vram_total_mb", 4096)
+                        vram_used = int(gpu.get("vram_used_mb", 0))
+                        vram_total = int(gpu.get("vram_total_mb", 4096))
                         vram_text = f"VRAM GTX 1650: {vram_used} MB / {vram_total} MB"
                     else:
                         vram_text = "VRAM: N/A (GPU Indisponível)"
