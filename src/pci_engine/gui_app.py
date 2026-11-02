@@ -1870,7 +1870,7 @@ class PCIMasterGUI:
                         t.get("assigned_route") or "PENDENTE",
                         t["privacy_level"],
                         badge_status,
-                        t.get("attempts", 0),
+                        t.get("attempt_count", t.get("attempts", 0)),
                     ),
                     tags=(tag,),
                 )

@@ -393,8 +393,13 @@ class DatabaseManager:
             return PromotedTasksList(unlocked_ids)
 
     def delete_task(self, task_id: str) -> bool:
-        """Remove uma tarefa específica da fila tasks_queue."""
+        """Remove uma tarefa específica da fila tasks_queue tratando chaves estrangeiras dependentes."""
         with self.get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks_queue SET depends_on_task_id = NULL WHERE depends_on_task_id = ?",
+                (task_id,),
+            )
+            conn.execute("DELETE FROM kudos_ledger WHERE task_id = ?", (task_id,))
             cursor = conn.execute("DELETE FROM tasks_queue WHERE task_id = ?", (task_id,))
             conn.commit()
             return cursor.rowcount > 0
@@ -402,16 +407,24 @@ class DatabaseManager:
     def clear_completed_tasks(self) -> int:
         """Remove todas as tarefas concluídas (VERIFIED) e tarefas sintéticas de teste de auditoria da fila."""
         with self.get_connection() as conn:
-            cursor = conn.execute(
-                """
-                DELETE FROM tasks_queue
-                WHERE status = 'VERIFIED'
-                   OR task_id LIKE 'TASK_E2E_%'
-                   OR task_id LIKE 'TASK_LEASE_%'
-                   OR task_id LIKE 'TASK_EXPIRED_%'
-                   OR task_id LIKE 'TASK_DONOR_FIRETEST_%'
+            where_clause = """
+                status = 'VERIFIED'
+                OR task_id LIKE 'TASK_E2E_%'
+                OR task_id LIKE 'TASK_LEASE_%'
+                OR task_id LIKE 'TASK_EXPIRED_%'
+                OR task_id LIKE 'TASK_DONOR_FIRETEST_%'
+            """
+            conn.execute(
+                f"""
+                UPDATE tasks_queue
+                SET depends_on_task_id = NULL
+                WHERE depends_on_task_id IN (SELECT task_id FROM tasks_queue WHERE {where_clause})
                 """
             )
+            conn.execute(
+                f"DELETE FROM kudos_ledger WHERE task_id IN (SELECT task_id FROM tasks_queue WHERE {where_clause})"
+            )
+            cursor = conn.execute(f"DELETE FROM tasks_queue WHERE {where_clause}")
             conn.commit()
             return cursor.rowcount
 
@@ -422,7 +435,7 @@ class DatabaseManager:
                 """
                 UPDATE tasks_queue
                 SET status = 'PENDING',
-                    attempts = 0,
+                    attempt_count = 0,
                     assigned_route = NULL,
                     leased_by_node = NULL,
                     lease_expires_at = NULL,
