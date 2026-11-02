@@ -35,3 +35,26 @@ def test_aider_is_available():
     runner = AiderRunner()
     # Verifica se detecta o aider já instalado no ambiente
     assert runner.is_available() is True
+from pathlib import Path
+from pci_engine.aider_runner import AiderRunner
+
+
+def test_aider_turbo_mode_flags():
+    runner = AiderRunner()
+    cmd = runner.build_command(
+        files=["src/main.py"],
+        message="Add login function",
+        mode="code",
+        turbo_mode=True,
+    )
+    assert "--auto-commits" in cmd
+    assert "--yes-always" in cmd
+    assert "--no-auto-commits" not in cmd
+
+
+def test_aider_side_by_side_diff_generation():
+    old = "def hello():\n    return 'old'\n"
+    new = "def hello():\n    return 'new'\n"
+    diff = AiderRunner.generate_side_by_side_diff(old, new, "test.py")
+    assert "-    return 'old'" in diff
+    assert "+    return 'new'" in diff

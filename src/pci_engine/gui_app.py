@@ -124,7 +124,13 @@ class PCIMasterGUI:
         self.root.title("PCI Sovereign Code Engine v2.3 — Master Control Console")
         self.root.geometry("1280x820")
         self.root.minsize(1140, 720)
-        self.root.configure(fg_color="#070a10")
+        try:
+            self.root.configure(fg_color="#070a10")
+        except Exception:
+            try:
+                self.root.configure(bg="#070a10")
+            except Exception:
+                pass
         self._apply_window_icon()
 
         # Estado interno
@@ -138,12 +144,14 @@ class PCIMasterGUI:
         self._broker_process: Optional[subprocess.Popen] = None
 
         # Workspace Ativo (Ponte Multi-Projetos para SESAU, Nexus, LicitAI, etc.)
-        default_target_ws = Path(r"C:\Lab\012 - Auditoria (SESAU)")
+        default_target_ws = self.repo_root / "data" / "sovereign_export"
+        default_target_ws.mkdir(parents=True, exist_ok=True)
         if not default_target_ws.exists():
             default_target_ws = self.repo_root
         self.target_workspace_var = tk.StringVar(value=str(default_target_ws))
         self.workspace_bridge = WorkspaceBridge(default_target_ws)
         self.aider_runner = AiderRunner(self.repo_root)
+        self.turbo_mode_var = tk.BooleanVar(value=False)
 
         # Variáveis de texto reativas para telemetria na barra lateral
         self.ram_text_var = tk.StringVar(value="RAM: Inicializando...")
@@ -2710,10 +2718,25 @@ class PCIMasterGUI:
 
         ctk.CTkLabel(
             header_frame,
-            text="⚡ Aider Sub-Executor Supervisionado // Modo Architect & Decomposição Cirúrgica",
+            text="⚡ Aider Agentic Engine // Modo Architect & Execução",
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color="#00f5d4",
         ).grid(row=0, column=0, sticky="w")
+
+        # Seletor de Modo: Turbo vs Request Review (Estilo Antigravity)
+        mode_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        mode_frame.grid(row=0, column=1, sticky="e")
+
+        self.switch_turbo = ctk.CTkSwitch(
+            mode_frame,
+            text="⚡ Modo Turbo (Execução sem Restrições / Auto-Commit)",
+            variable=self.turbo_mode_var,
+            onvalue=True,
+            offvalue=False,
+            progress_color="#ff007f",
+            font=ctk.CTkFont(size=11, weight="bold"),
+        )
+        self.switch_turbo.pack(side="right", padx=(10, 0))
 
         info_lbl = ctk.CTkLabel(
             parent,
@@ -2828,12 +2851,14 @@ class PCIMasterGUI:
         if not prompt:
             prompt = "Aplique a refatoracao incremental no arquivo mantendo compatibilidade e testes passando."
 
-        self.log(f"Disparando Aider em modo /code: {prompt[:60]}...")
+        is_turbo = self.turbo_mode_var.get()
+        mode_label = "TURBO (Auto-Commit Aprovado)" if is_turbo else "REQUEST REVIEW (Aprovação Manual)"
+        self.log(f"Disparando Aider [{mode_label}]: {prompt[:60]}...")
         self.aider_output_box.delete("1.0", "end")
-        self.aider_output_box.insert("1.0", f"[AIDER RUNNING] Executando /code (--no-auto-commits)...\nComando: {prompt}\n\n")
+        self.aider_output_box.insert("1.0", f"[AIDER RUNNING] Modo: {mode_label}\nComando: {prompt}\n\n")
 
         def _worker():
-            res = self.aider_runner.run_surgical_code(files=[], instruction=prompt)
+            res = self.aider_runner.run_surgical_code(files=[], instruction=prompt, turbo_mode=is_turbo)
             out = res.get("output") or res.get("error", "Sem saida registrada.")
             def _ui():
                 self.aider_output_box.delete("1.0", "end")

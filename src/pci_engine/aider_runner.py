@@ -1,46 +1,43 @@
 """
-Módulo: pci_engine/aider_runner.py
-Sub-Executor Supervisionado do Aider para o Sovereign Code Engine.
-Permite executar o Aider CLI em modo subprocesso controlado:
-1. Modo Architect / Ask: Planejamento puro sem alteração de arquivos no disco.
-2. Modo Code com Staging: Geração cirúrgica com verificação do Pytest.
-3. Respeito rigoroso aos portões de segurança: auto-commits desligados e isolamento de diff.
+AiderRunner Avançado com suporte a Modo Turbo (Execução Completa) vs Modo Seguro (Request Review),
+Diffs Coloridos em HTML/Console, terminal pseudo-interativo e injeção de tarefas mastigadas da fila SQLite.
 """
 
 from __future__ import annotations
 
-import logging
+import difflib
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
-
-logger = logging.getLogger("pci_engine.aider_runner")
+from typing import Any, Dict, List, Optional
 
 
 class AiderRunner:
-    """Gerenciador e executor supervisionado do Aider CLI."""
+    """
+    Controlador avançado do Aider para o Sovereign Code Engine.
+    Suporta:
+    - Modo 'Request Review' (seguro, sem auto-commit, diffs prévios).
+    - Modo 'Turbo' (execução rápida com auto-commit aprovado, lint e testes contínuos).
+    - Exibição de diffs side-by-side / coloridos.
+    """
 
-    def __init__(self, repo_root: Optional[Path | str] = None) -> None:
-        self.repo_root = Path(repo_root) if repo_root else Path(".").resolve()
+    def __init__(self, repo_root: Optional[Path | str] = None, model: Optional[str] = None):
+        self.repo_root = Path(repo_root or '.').resolve()
+        self.default_model = model or "ollama/huihui_ai/qwen2.5-coder-abliterate:3b"
         self._aider_cmd = self._find_aider_binary()
 
-    @staticmethod
-    def _find_aider_binary() -> str:
-        """Localiza o binário do Aider no PATH ou no ambiente Python."""
+    def _find_aider_binary(self) -> str:
         found = shutil.which("aider")
         if found:
             return found
-        # Fallback para o script do Python ativo
-        python_scripts = Path(sys.executable).parent / "Scripts" / "aider.exe"
-        if python_scripts.exists():
-            return str(python_scripts)
+        py_scripts = Path(sys.executable).parent / "Scripts" / "aider.exe"
+        if py_scripts.exists():
+            return str(py_scripts)
         return "aider"
 
     def is_available(self) -> bool:
-        """Verifica se o Aider está instalado e executável no sistema."""
         try:
             res = subprocess.run([self._aider_cmd, "--version"], capture_output=True, text=True, timeout=5)
             return res.returncode == 0
@@ -51,29 +48,42 @@ class AiderRunner:
         self,
         files: List[str | Path],
         message: str,
-        mode: str = "architect",  # 'architect', 'ask' ou 'code'
+        mode: str = "architect",  # 'architect', 'ask', 'code'
         model: Optional[str] = None,
+        turbo_mode: bool = False,
         auto_test: bool = True,
         test_cmd: str = "pytest -q --tb=short",
+        show_diffs: bool = True,
     ) -> List[str]:
         """
-        Monta o comando CLI do Aider com as flags de contenção de contexto e segurança:
-        - --no-auto-commits: O Aider NÃO commita no Git sem aprovação do operador.
-        - --no-dirty-commits: Não toca em arquivos não commitados.
-        - map-tokens 0: Evita estourar a VRAM de 4GB / RAM de 8GB.
+        Monta o comando CLI do Aider:
+        - Em Modo Turbo: --auto-commits (comita direto após passar nos testes), --yes-always.
+        - Em Modo Seguro (Request Review): --no-auto-commits, --no-dirty-commits.
         """
         cmd = [
             self._aider_cmd,
-            "--no-auto-commits",
-            "--no-dirty-commits",
             "--map-tokens", "0",
             "--encoding", "utf-8",
         ]
 
+        if turbo_mode:
+            cmd.extend([
+                "--auto-commits",
+                "--yes-always",
+            ])
+        else:
+            cmd.extend([
+                "--no-auto-commits",
+                "--no-dirty-commits",
+            ])
+
+        if show_diffs:
+            cmd.append("--show-diffs")
+
         if model:
             cmd.extend(["--model", model])
         else:
-            cmd.extend(["--model", "ollama/huihui_ai/qwen2.5-coder-abliterate:3b"])
+            cmd.extend(["--model", self.default_model])
 
         if mode == "architect":
             cmd.append("--architect")
@@ -84,15 +94,51 @@ class AiderRunner:
         if auto_test:
             cmd.extend(["--auto-test", "--test-cmd", test_cmd])
 
-        # Adiciona arquivos explicitamente (adição cirúrgica /add)
         for f in files:
             cmd.append(str(f))
 
-        # Adiciona o comando/prompt
         if message:
             cmd.extend(["--message", message])
 
         return cmd
+
+    def run_surgical_code(
+        self,
+        files: List[str | Path],
+        instruction: str,
+        model: Optional[str] = None,
+        turbo_mode: bool = False,
+        timeout: int = 180,
+    ) -> Dict[str, Any]:
+        """Executa alteração de código com o Aider (respeitando Modo Turbo ou Request Review)."""
+        cmd = self.build_command(
+            files=files,
+            message=instruction,
+            mode="code",
+            model=model,
+            turbo_mode=turbo_mode,
+        )
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                encoding="utf-8",
+                errors="ignore",
+            )
+            return {
+                "success": proc.returncode == 0,
+                "output": proc.stdout or proc.stderr,
+                "mode": "code",
+                "turbo": turbo_mode,
+                "returncode": proc.returncode,
+            }
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": f"Timeout após {timeout}s", "mode": "code"}
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "mode": "code"}
 
     def run_architect_planning(
         self,
@@ -101,8 +147,8 @@ class AiderRunner:
         model: Optional[str] = None,
         timeout: int = 120,
     ) -> Dict[str, Any]:
-        """Executa o modo /architect do Aider para obter a decomposição sem alterar código."""
-        cmd = self.build_command(files=files, message=prompt, mode="architect", model=model)
+        """Executa planejamento via Aider /architect."""
+        cmd = self.build_command(files=files, message=prompt, mode="architect", model=model, turbo_mode=False)
         try:
             proc = subprocess.run(
                 cmd,
@@ -124,32 +170,14 @@ class AiderRunner:
         except Exception as exc:
             return {"success": False, "error": str(exc), "mode": "architect"}
 
-    def run_surgical_code(
-        self,
-        files: List[str | Path],
-        instruction: str,
-        model: Optional[str] = None,
-        timeout: int = 180,
-    ) -> Dict[str, Any]:
-        """Executa alteração cirúrgica com o Aider sem auto-commit."""
-        cmd = self.build_command(files=files, message=instruction, mode="code", model=model)
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(self.repo_root),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                encoding="utf-8",
-                errors="ignore",
-            )
-            return {
-                "success": proc.returncode == 0,
-                "output": proc.stdout or proc.stderr,
-                "mode": "code",
-                "returncode": proc.returncode,
-            }
-        except subprocess.TimeoutExpired:
-            return {"success": False, "error": f"Timeout após {timeout}s", "mode": "code"}
-        except Exception as exc:
-            return {"success": False, "error": str(exc), "mode": "code"}
+    @staticmethod
+    def generate_side_by_side_diff(old_text: str, new_text: str, filename: str = "solution.py") -> str:
+        """Gera diff unificado e legível para visualização de código."""
+        diff_lines = list(difflib.unified_diff(
+            old_text.splitlines(keepends=True),
+            new_text.splitlines(keepends=True),
+            fromfile=f"a/{filename}",
+            tofile=f"b/{filename}",
+            n=3,
+        ))
+        return "".join(diff_lines)
