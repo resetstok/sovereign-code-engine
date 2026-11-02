@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sovereign-code-engine"
 version = "2.0.0"
-description = "Sovereign Code Engine v2.0 - Distributed Local Programming, SQLite Broker & Donor Horde"
+description = "PCI Master System v2.0 - Sovereign Code Engine"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -13,17 +13,19 @@ authors = [
     { name = "resetstok", email = "resetstokworld@gmail.com" }
 ]
 dependencies = [
-    "psutil>=5.9.0",
-    "pytest>=8.0.0",
-    "pyyaml>=6.0.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
+    "psutil>=5.9.0",
+    "pydantic>=2.0.0",
     "requests>=2.31.0",
+    "cryptography>=41.0.0",
+    "customtkinter>=5.2.0",
+    "pytest>=8.0.0",
+    "pyinstaller>=6.0.0"
 ]
 
 [project.scripts]
 pci-engine = "pci_engine.cli:main"
-code-engine = "pci_engine.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
