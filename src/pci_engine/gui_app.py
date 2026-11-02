@@ -96,7 +96,17 @@ class PCIMasterGUI:
         repo_root: Optional[Path | str] = None,
         headless_test: bool = False,
     ) -> None:
-        self.repo_root = Path(repo_root) if repo_root else Path(__file__).resolve().parents[2]
+        if repo_root:
+            self.repo_root = Path(repo_root)
+        elif getattr(sys, "frozen", False):
+            # Se executado via dist/PCI_Master_System/PCI_Master_System.exe
+            candidate_parent = Path(sys.executable).resolve().parents[1]
+            if (candidate_parent / "assets" / "triquetra_hud.html").exists():
+                self.repo_root = candidate_parent
+            else:
+                self.repo_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        else:
+            self.repo_root = Path(__file__).resolve().parents[2]
         self.db_path = Path(db_path) if db_path else self.repo_root / "data" / "jobs.db"
         self.api_keys_path = self.repo_root / "config" / "api_keys.json"
         self.headless_test = headless_test or (root is not None)
@@ -1173,6 +1183,10 @@ class PCIMasterGUI:
     def _on_open_web_triquetra_hud(self) -> None:
         """Abre o HUD Triquetra em HTML5/CSS3/SVG puro no navegador padrão."""
         hud_path = self.repo_root / "assets" / "triquetra_hud.html"
+        if not hud_path.exists():
+            alt_hud = self.repo_root / "_internal" / "assets" / "triquetra_hud.html"
+            if alt_hud.exists():
+                hud_path = alt_hud
         if hud_path.exists():
             webbrowser.open(hud_path.as_uri())
             self.log(f"HUD Triquetra Web aberto no navegador: {hud_path.name}")
@@ -1862,7 +1876,7 @@ class PCIMasterGUI:
             )
 
             heavy_candidates, heavy_mb = RAMLiberator.scan_heavy_interactive_processes()
-            if heavy_candidates and heavy_mb > 50.0:
+            if heavy_candidates and heavy_mb > 10.0:
                 details = "\n".join(
                     f"• {c.name} ({c.description}): {c.total_rss_mb:.1f} MB [{c.count} instância(s)]"
                     for c in heavy_candidates
@@ -2018,9 +2032,9 @@ class PCIMasterGUI:
         self._set_ai_step_progress(2, 40.0, "MTV GERAÇÃO")
 
         def _worker():
-            from pci_engine.mtv_core import make_ollama_generator, solve_task
+            from pci_engine.mtv_core import ollama_generator, run_task
             try:
-                gen = make_ollama_generator(host="http://127.0.0.1:11434", model="huihui_ai/qwen2.5-coder-abliterate:3b")
+                gen = ollama_generator(host="http://127.0.0.1:11434", model="qwen2.5-coder:3b")
             except Exception as e:
                 self.log(f"Erro ao inicializar gerador Ollama: {e}")
                 self._set_ai_step_progress(5, 100.0, "FALHA OLLAMA")
@@ -2034,7 +2048,7 @@ class PCIMasterGUI:
                 self.log(f"[MTV] Processando micro-tarefa: {tf.name}...")
                 self.dispatch_to_ui(lambda: self._set_ai_step_progress(3, 70.0, f"MTV: {tf.name}"))
                 try:
-                    passed = solve_task(
+                    passed = run_task(
                         task_dir=tf,
                         out_dir=out_dir,
                         generator=gen,
@@ -2576,8 +2590,12 @@ class PCIMasterGUI:
             self.log("Iniciando compilação do executável PCI_Donor_Agent.exe via PyInstaller...")
             bat_path = self.repo_root / "donor_client" / "build_donor_exe.bat"
             if not bat_path.exists():
-                self.log("ERRO: Script build_donor_exe.bat não encontrado.")
-                return
+                alt_donor = self.repo_root / "_internal" / "donor_client" / "build_donor_exe.bat"
+                if alt_donor.exists():
+                    bat_path = alt_donor
+                else:
+                    self.log(f"ERRO: Script build_donor_exe.bat não encontrado em {bat_path}.")
+                    return
 
             try:
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -2651,8 +2669,13 @@ class PCIMasterGUI:
         """Executa o script de agendamento no Windows Task Scheduler."""
         bat_path = self.repo_root / "config" / "register_nightly_task.bat"
         if not bat_path.exists():
-            messagebox.showerror("Erro", "Script config/register_nightly_task.bat não encontrado.")
-            return
+            # Tenta buscar em subpasta _internal (PyInstaller frozen mode)
+            alt_path = self.repo_root / "_internal" / "config" / "register_nightly_task.bat"
+            if alt_path.exists():
+                bat_path = alt_path
+            else:
+                messagebox.showerror("Erro", f"Script register_nightly_task.bat não encontrado em: {bat_path}")
+                return
 
         def _run() -> None:
             try:

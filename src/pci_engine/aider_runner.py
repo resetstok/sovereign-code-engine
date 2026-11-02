@@ -25,7 +25,7 @@ class AiderRunner:
 
     def __init__(self, repo_root: Optional[Path | str] = None, model: Optional[str] = None):
         self.repo_root = Path(repo_root or '.').resolve()
-        self.default_model = model or "ollama/huihui_ai/qwen2.5-coder-abliterate:3b"
+        self.default_model = model or "ollama/qwen2.5-coder:3b"
         self._aider_cmd = self._find_aider_binary()
 
     def _find_aider_binary(self) -> str:
@@ -62,8 +62,11 @@ class AiderRunner:
         """
         cmd = [
             self._aider_cmd,
+            "--no-show-model-warnings",
+            "--no-git-commit-verify",
             "--map-tokens", "0",
             "--encoding", "utf-8",
+            "--exit",
         ]
 
         if turbo_mode:
@@ -119,6 +122,9 @@ class AiderRunner:
             turbo_mode=turbo_mode,
         )
         try:
+            custom_env = os.environ.copy()
+            custom_env["OLLAMA_API_BASE"] = "http://127.0.0.1:11434"
+            custom_env["PYTHONIOENCODING"] = "utf-8"
             proc = subprocess.run(
                 cmd,
                 cwd=str(self.repo_root),
@@ -127,6 +133,7 @@ class AiderRunner:
                 timeout=timeout,
                 encoding="utf-8",
                 errors="ignore",
+                env=custom_env,
             )
             return {
                 "success": proc.returncode == 0,
@@ -150,6 +157,9 @@ class AiderRunner:
         """Executa planejamento via Aider /architect."""
         cmd = self.build_command(files=files, message=prompt, mode="architect", model=model, turbo_mode=False)
         try:
+            custom_env = os.environ.copy()
+            custom_env["OLLAMA_API_BASE"] = "http://127.0.0.1:11434"
+            custom_env["PYTHONIOENCODING"] = "utf-8"
             proc = subprocess.run(
                 cmd,
                 cwd=str(self.repo_root),
@@ -158,6 +168,7 @@ class AiderRunner:
                 timeout=timeout,
                 encoding="utf-8",
                 errors="ignore",
+                env=custom_env,
             )
             return {
                 "success": proc.returncode == 0,
