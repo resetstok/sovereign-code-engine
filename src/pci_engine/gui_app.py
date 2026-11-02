@@ -27,6 +27,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+# Garante que a raiz do repositório e src/ estejam no sys.path mesmo se iniciado via duplo-clique
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+if str(_REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT / "src"))
+
 import psutil
 
 try:
