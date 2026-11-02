@@ -169,3 +169,19 @@ def test_gui_context_guard_flow(gui_instance: PCIMasterGUI, tmp_path: Path):
     sample = chr(34) + chr(115) + chr(107) + chr(45) + chr(49) + chr(50) + chr(51) + chr(52) + chr(53) + chr(54) + chr(55) + chr(56) + chr(57) + chr(48) + chr(97) + chr(98) + chr(99) + chr(100) + chr(101) + chr(102) + chr(49) + chr(50) + chr(51) + chr(52) + chr(53) + chr(34)
     res = ContextGuard.inspect_and_sanitize(sample)
     assert res[chr(104)+chr(97)+chr(115)+chr(95)+chr(115)+chr(101)+chr(99)+chr(114)+chr(101)+chr(116)+chr(115)] is True
+
+
+def test_gui_hard_wallet_interaction(gui_instance, tmp_path):
+    app = gui_instance
+    # Valida clique no botao de leitura sem hard wallet inserida
+    app._on_detect_hard_wallet_clicked()
+    # Cria pendrive mock com chave
+    usb = tmp_path / 'usb_drive'
+    usb.mkdir()
+    from pci_engine.hard_wallet import HardWalletManager
+    HardWalletManager.write_hard_wallet_key(usb, 'SenhaHardWalletTeste123')
+    # Injeta busca mock e testa leitura com sucesso
+    key_val = HardWalletManager.detect_hard_wallet_key([usb])
+    assert key_val is not None
+    app.operator_password_var.set(key_val[0])
+    assert app.operator_password_var.get() == 'SenhaHardWalletTeste123'

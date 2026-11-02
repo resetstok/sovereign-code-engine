@@ -35,6 +35,7 @@ import customtkinter as ctk
 
 from pci_engine.benchmark_runner import BenchmarkRunner
 from pci_engine.context_guard import ContextGuard
+from pci_engine.hard_wallet import HardWalletManager
 from pci_engine.database import DatabaseManager
 from pci_engine.decomposer import MasterbookDecomposer
 from pci_engine.drive_sync import DriveSyncManager
@@ -45,6 +46,7 @@ from pci_engine.ram_liberator import RAMLiberator
 from pci_engine.router import PCIRouter
 from pci_engine.sanitizer import ForensicSanitizer
 from pci_engine.context_guard import ContextGuard
+from pci_engine.hard_wallet import HardWalletManager
 from pci_engine.aider_runner import AiderRunner
 from pci_engine.workspace_bridge import WorkspaceBridge, ExportReceipt
 
@@ -1248,7 +1250,34 @@ class PCIMasterGUI:
             hover_color="#2b3b55",
             font=ctk.CTkFont(size=11),
         )
-        btn_toggle_pwd.pack(side="left")
+        btn_toggle_pwd.pack(side="left", padx=(0, 6))
+
+        btn_detect_hw = ctk.CTkButton(
+            pwd_row,
+            text="🔌 Ler Hard Wallet (USB)",
+            width=160,
+            height=28,
+            command=self._on_detect_hard_wallet_clicked,
+            fg_color="#00f5d4",
+            text_color="#070a10",
+            hover_color="#00bbf9",
+            font=ctk.CTkFont(size=11, weight="bold"),
+        )
+        btn_detect_hw.pack(side="left", padx=(0, 6))
+
+        btn_create_hw = ctk.CTkButton(
+            pwd_row,
+            text="💾 Gravar no Pendrive",
+            width=150,
+            height=28,
+            command=self._on_write_hard_wallet_clicked,
+            fg_color="#132238",
+            hover_color="#1f3657",
+            text_color="#00f5d4",
+            font=ctk.CTkFont(size=11),
+        )
+        btn_create_hw.pack(side="left")
+
 
         btn_forensic_row = ctk.CTkFrame(parent, fg_color="transparent")
         btn_forensic_row.pack(fill="x", padx=15, pady=8)
@@ -2667,6 +2696,47 @@ class PCIMasterGUI:
         self.aider_output_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
         action_box.grid_rowconfigure(1, weight=1)
         self.aider_output_box.insert("1.0", "Console do Aider pronto. Digite uma instrução acima e clique em 'Executar /architect'.\n")
+
+    def _on_detect_hard_wallet_clicked(self) -> None:
+        status = HardWalletManager.get_wallet_status()
+        if status.get("wallet_connected"):
+            key_path = status.get("key_file")
+            key_val = HardWalletManager.detect_hard_wallet_key()
+            if key_val:
+                self.operator_password_var.set(key_val[0])
+                self.log(f"Hard Wallet detectada com sucesso em {key_path}! Senha do operador carregada.")
+                if not self.headless_test:
+                    messagebox.showinfo("Hard Wallet Conectada", f"Chave carregada do pendrive:\n{key_path}")
+        else:
+            self.log("Nenhuma Hard Wallet / Pendrive com chave .vault_key encontrado.")
+            if not self.headless_test:
+                messagebox.showwarning("Aviso Hard Wallet", "Nenhum pendrive com .vault_key encontrado.")
+
+    def _on_write_hard_wallet_clicked(self) -> None:
+        pwd = self.operator_password_var.get().strip()
+        if not pwd:
+            if not self.headless_test:
+                messagebox.showerror("Erro", "Digite primeiro uma senha no campo antes de gravar no pendrive.")
+            return
+        drives = HardWalletManager.list_available_removable_drives()
+        if not drives:
+            if self.headless_test:
+                return
+            sel = filedialog.askdirectory(title="Selecione a unidade do Pendrive / Hard Wallet")
+            if not sel:
+                return
+            target = Path(sel)
+        else:
+            target = drives[0]
+        try:
+            saved = HardWalletManager.write_hard_wallet_key(target, pwd)
+            self.log(f"Hard Wallet física gravada em {saved}!")
+            if not self.headless_test:
+                messagebox.showinfo("Hard Wallet Gravada", f"Chave de cofre salva com sucesso em:\n{saved}")
+        except Exception as e:
+            self.log(f"Falha ao gravar Hard Wallet: {e}")
+            if not self.headless_test:
+                messagebox.showerror("Erro", f"Falha ao gravar chave: {e}")
 
     def _on_run_aider_architect_clicked(self) -> None:
         prompt = self.aider_prompt_entry.get().strip()

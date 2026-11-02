@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Set
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from pci_engine.hard_wallet import HardWalletManager
 
 logger = logging.getLogger("pci_engine.context_guard")
 
@@ -84,9 +85,14 @@ class ContextGuard:
             if val:
                 return val
 
-        env_pwd = os.getenv("PCI_OPERATOR_PASSWORD")
+        env_pwd = os.getenv('PCI_OPERATOR_PASSWORD')
         if env_pwd and env_pwd.strip():
             return env_pwd.strip()
+
+        # 3. Consulta Pendrive / Hard Wallet USB
+        hw_key = HardWalletManager.detect_hard_wallet_key()
+        if hw_key and hw_key[0]:
+            return hw_key[0]
 
         return cls.DEFAULT_OPERATOR_PASSWORD
 
