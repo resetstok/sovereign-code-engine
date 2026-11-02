@@ -1661,10 +1661,12 @@ class PCIMasterGUI:
     def _on_hybrid_switch_toggled(self) -> None:
         """Alterna entre modo 100% offline e modo híbrido com APIs gratuitas."""
         if self.is_hybrid_mode.get():
+            os.environ["PCI_HYBRID_MODE"] = "1"
             prov = self.selected_provider_var.get()
             self.log(f"Modo Híbrido ATIVADO (Provedor ativo: {prov}). Tarefas complexas poderão usar API.")
             self.api_key_entry.configure(state="normal")
         else:
+            os.environ["PCI_HYBRID_MODE"] = "0"
             self.log("Modo 100% Offline ATIVADO: Todos os dados ficam estritamente confinados no PC local.")
 
     def _on_broker_switch_toggled(self) -> None:

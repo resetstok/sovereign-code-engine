@@ -7,8 +7,10 @@ Elimina overhead de System Prompt (< 1.000 tokens) e aplica travas em tempo de e
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -196,8 +198,75 @@ Com base nisso, retorne o código Python completo e válido de '{target_file}' (
 """
         return prompt
 
+    def _call_cloud_api_if_configured(self, prompt: str) -> Optional[str]:
+        """
+        Se o operador ativou o Modo Híbrido e configurou uma chave de API (Gemini, Groq, OpenRouter,
+        DeepSeek, OpenAI, Cerebras, Mistral), tenta gerar via API para máxima velocidade.
+        Retorna None se nenhuma chave estiver ativa, fazendo fallback transparente para o Ollama local.
+        """
+        # 1. Google Gemini API (AI Studio)
+        gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        if gemini_key:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+                body = json.dumps({
+                    "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048},
+                }).encode("utf-8")
+                req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=35) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+            except Exception as exc:
+                logger.warning(f"Fallback Gemini -> Ollama local ({exc})")
+
+        # 2. Provedores compatíveis com OpenAI Chat Completions (Groq, OpenRouter, DeepSeek, OpenAI, Cerebras, Mistral)
+        openai_compat = [
+            ("GROQ_API_KEY", "https://api.groq.com/openai/v1/chat/completions", "llama-3.3-70b-versatile"),
+            ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1/chat/completions", "qwen/qwen-2.5-coder-32b-instruct:free"),
+            ("DEEPSEEK_API_KEY", "https://api.deepseek.com/v1/chat/completions", "deepseek-chat"),
+            ("OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions", "gpt-4o-mini"),
+            ("CEREBRAS_API_KEY", "https://api.cerebras.ai/v1/chat/completions", "llama3.1-8b"),
+            ("MISTRAL_API_KEY", "https://api.mistral.ai/v1/chat/completions", "codestral-latest"),
+        ]
+        for env_name, endpoint, model_id in openai_compat:
+            api_key = os.environ.get(env_name, "").strip()
+            if api_key:
+                try:
+                    body = json.dumps({
+                        "model": model_id,
+                        "messages": [
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.1,
+                        "max_tokens": 2048,
+                    }).encode("utf-8")
+                    req = urllib.request.Request(
+                        endpoint,
+                        data=body,
+                        headers={
+                            "Content-Type": "application/json",
+                            "Authorization": f"Bearer {api_key}",
+                            "User-Agent": "PCI-Sovereign-Engine/2.3",
+                        },
+                    )
+                    with urllib.request.urlopen(req, timeout=35) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        return data["choices"][0]["message"]["content"]
+                except Exception as exc:
+                    logger.warning(f"Fallback {env_name} -> próximo/Ollama local ({exc})")
+
+        return None
+
     def _call_llm(self, prompt: str) -> str:
-        """Executa a chamada HTTP com isolamento de proxy para o Ollama local."""
+        """Executa a chamada HTTP para API Cloud (se Modo Híbrido ativo) ou Ollama local."""
+        if os.environ.get("PCI_HYBRID_MODE") == "1":
+            cloud_resp = self._call_cloud_api_if_configured(prompt)
+            if cloud_resp:
+                return cloud_resp
+
         payload = json.dumps({
             "model": self.model,
             "system": SYSTEM_PROMPT,
@@ -216,7 +285,7 @@ Com base nisso, retorne o código Python completo e válido de '{target_file}' (
             headers={"Content-Type": "application/json"},
         )
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(req, timeout=45) as resp:
+        with opener.open(req, timeout=60) as resp:
             resp_data = json.loads(resp.read().decode("utf-8"))
             return resp_data.get("response", "")
 
@@ -228,7 +297,7 @@ Com base nisso, retorne o código Python completo e válido de '{target_file}' (
         target_file_path: str,
         max_attempts: int = 3,
     ) -> Dict[str, Any]:
-        """Executa o ciclo completo TDD usando o modelo local com travas ativas."""
+        """Executa o ciclo completo TDD usando o modelo local com travas AST e Pytest ativas."""
         self.reset_session()
         target_file = target_file_path.replace("\\", "/")
 
@@ -245,7 +314,7 @@ Com base nisso, retorne o código Python completo e válido de '{target_file}' (
             logger.info(f"MicroHarness ciclo {task_id} - Tentativa {attempt}/{max_attempts}")
             prompt = self.build_prompt_with_journal(spec_markdown, test_code, target_file)
 
-            # Chama o LLM local
+            # Chama o LLM
             try:
                 generated_text = self._call_llm(prompt)
             except Exception as exc:
@@ -254,7 +323,20 @@ Com base nisso, retorne o código Python completo e válido de '{target_file}' (
             # Extrai o código Python gerado de blocos markdown
             clean_code = self._extract_python_code(generated_text)
 
-            # Grava no arquivo (respeitando a invariante)
+            # Invariante AST: Valida sintaxe Python antes de gravar ou rodar Pytest
+            try:
+                ast.parse(clean_code)
+            except SyntaxError as syn_err:
+                self.journal.append(
+                    JournalEntry(
+                        attempt=attempt,
+                        failed_test_output=f"SyntaxError na linha {syn_err.lineno}: {syn_err.msg}",
+                        action_taken="Código rejeitado na barreira AST antes do Pytest",
+                    )
+                )
+                continue
+
+            # Grava no arquivo (respeitando a invariante read-before-edit)
             self.tool_write(target_file, clean_code)
 
             # Roda o teste isolado via tool_bash com inclusão do repositório no pythonpath
@@ -344,7 +426,7 @@ Com base nisso, retorne o código Python completo e válido de '{target_file}' (
         return res
 
     def run_next_local_task(self) -> Optional[Dict[str, Any]]:
-        """Busca e executa a próxima tarefa elegível para o modelo local 3B."""
+        """Busca e executa a próxima tarefa elegível da fila cujas dependências estejam VERIFIED."""
         if not self.db:
             return None
 
@@ -353,7 +435,7 @@ Com base nisso, retorne o código Python completo e válido de '{target_file}' (
                 """
                 SELECT task_id FROM tasks_queue
                 WHERE status = 'PENDING'
-                  AND (assigned_route = 'LOCAL_3B' OR (assigned_route IS NULL AND estimated_lines <= 35))
+                  AND (assigned_route IS NULL OR assigned_route != 'DONOR_POOL')
                   AND (depends_on_task_id IS NULL OR depends_on_task_id IN (
                       SELECT task_id FROM tasks_queue WHERE status = 'VERIFIED'
                   ))

@@ -162,9 +162,16 @@ class MasterbookDecomposer:
         if not force_fallback:
             json_schema = MasterbookDecompositionResult.model_json_schema()
             prompt = (
-                f"Analise o Masterbook abaixo e decomponha em uma lista ordenada de microtarefas atômicas (DAG).\n"
-                f"Cada tarefa deve ter no máximo {max_lines_per_slice} linhas e ter teste unitário em Pytest completo.\n\n"
-                f"MASTERBOOK:\n{masterbook_content}\n"
+                "Você é o Arquiteto Decompositor TDD do PCI Engine.\n"
+                "Analise a especificação abaixo e decomponha em microtarefas atômicas encadeadas (DAG).\n"
+                "REGRAS OBRIGATÓRIAS:\n"
+                f"1. Cada microtarefa deve ter estimated_lines <= {max_lines_per_slice}.\n"
+                "2. A primeira tarefa DEVE ter depends_on_task_id = null. As seguintes dependem do task_id anterior.\n"
+                "3. task_type DEVE ser um destes: 'EXTRACTION', 'CRUD', 'PARSER_OSINT', 'ARCHITECTURE'.\n"
+                "4. privacy_level DEVE ser 'PUBLIC' ou 'STRICT_LOCAL'.\n"
+                "5. Em test_code, escreva um teste Pytest real que importe a função exatamente de target_file_path "
+                "(ex: se target_file_path for 'src/analytics.py', use 'from src.analytics import nome_funcao').\n\n"
+                f"ESPECIFICAÇÃO DO OPERADOR:\n{masterbook_content}\n"
             )
 
             try:
@@ -222,24 +229,46 @@ class MasterbookDecomposer:
         )
 
     def _persist_tasks(self, result: MasterbookDecompositionResult) -> List[str]:
-        enqueued_ids = []
-        for task in result.tasks:
-            initial_status = "WAITING_DEPS" if task.depends_on_task_id else "PENDING"
+        valid_types = {"EXTRACTION", "CRUD", "REFACTOR", "PARSER_OSINT", "ARCHITECTURE"}
+        valid_privacies = {"PUBLIC", "SANITIZED_DERIVATIVE", "STRICT_LOCAL"}
+        enqueued_ids: List[str] = []
+        known_ids: set[str] = set()
+
+        for idx, task in enumerate(result.tasks):
+            clean_tid = re.sub(r"[^A-Za-z0-9_]", "_", task.task_id.strip().upper()) or f"TASK_AUTO_{idx+1:02d}"
+            raw_dep = (task.depends_on_task_id or "").strip()
+            if idx == 0 or raw_dep.lower() in ("", "none", "null", "n/a", clean_tid.lower()):
+                clean_dep = None
+            elif raw_dep in known_ids:
+                clean_dep = raw_dep
+            else:
+                clean_dep = enqueued_ids[-1] if enqueued_ids else None
+
+            clean_type = task.task_type.strip().upper()
+            if clean_type not in valid_types:
+                clean_type = "CRUD"
+
+            clean_priv = task.privacy_level.strip().upper()
+            if clean_priv not in valid_privacies:
+                clean_priv = "PUBLIC"
+
+            initial_status = "WAITING_DEPS" if clean_dep else "PENDING"
             self.db.insert_task(
-                task_id=task.task_id,
+                task_id=clean_tid,
                 parent_masterbook=result.parent_masterbook,
-                depends_on_task_id=task.depends_on_task_id,
-                task_type=task.task_type,
-                privacy_level=task.privacy_level,
-                permission_level=task.permission_level,
-                estimated_lines=task.estimated_lines,
+                depends_on_task_id=clean_dep,
+                task_type=clean_type,
+                privacy_level=clean_priv,
+                permission_level=max(1, min(4, int(task.permission_level))),
+                estimated_lines=max(5, min(500, int(task.estimated_lines))),
                 spec_markdown=task.spec_markdown,
                 test_code=task.test_code,
-                target_file_path=task.target_file_path,
+                target_file_path=task.target_file_path.strip().replace("\\", "/"),
                 status=initial_status,
-                max_attempts=task.max_attempts,
+                max_attempts=max(1, min(10, int(task.max_attempts))),
             )
-            enqueued_ids.append(task.task_id)
+            enqueued_ids.append(clean_tid)
+            known_ids.add(clean_tid)
         return enqueued_ids
 
     def _deterministic_parse_and_persist(
