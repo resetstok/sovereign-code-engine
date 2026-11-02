@@ -1,0 +1,24 @@
+{
+  "max_local_lines": 30,
+  "max_local_attempts": 2,
+  "min_model_qualification_rate": 0.86,
+  "target_model_qualification_rate": 0.96,
+  "local_model": "qwen2.5-coder:3b",
+  "nightly_model": "llama-server --mmap 1",
+  "providers": {
+    "groq": {
+      "model": "llama-3.3-70b-versatile",
+      "min_remaining_requests": 5
+    },
+    "cerebras": {
+      "model": "llama3.1-70b",
+      "min_remaining_requests": 5
+    },
+    "openrouter": {
+      "model": "deepseek/deepseek-r1:free",
+      "min_remaining_requests": 5
+    }
+  },
+  "lease_duration_minutes": 45,
+  "max_task_attempts": 3
+}

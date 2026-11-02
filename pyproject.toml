@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sovereign-code-engine"
-version = "1.0.0"
-description = "Sovereign Self-Hosted AI Programming Engine for Low-Spec Hardware (8GB RAM, 4GB VRAM)"
+version = "2.0.0"
+description = "Sovereign Code Engine v2.0 - Distributed Local Programming, SQLite Broker & Donor Horde"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -16,10 +16,14 @@ dependencies = [
     "psutil>=5.9.0",
     "pytest>=8.0.0",
     "pyyaml>=6.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "requests>=2.31.0",
 ]
 
 [project.scripts]
-code-engine = "code_engine.cli:main"
+pci-engine = "pci_engine.cli:main"
+code-engine = "pci_engine.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
