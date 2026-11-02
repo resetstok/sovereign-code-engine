@@ -131,6 +131,7 @@ class MicroHarness:
     def tool_bash(self, command: str, timeout_sec: int = 25) -> str:
         """Executa comando shell paginando a saída (ShellLog) e limitando o retorno para a IA."""
         try:
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             res = subprocess.run(
                 command,
                 shell=True,
@@ -138,6 +139,7 @@ class MicroHarness:
                 capture_output=True,
                 text=True,
                 timeout=timeout_sec,
+                creationflags=creation_flags,
             )
             stdout_lines = res.stdout.strip().splitlines()
             stderr_lines = res.stderr.strip().splitlines()
@@ -175,7 +177,10 @@ class MicroHarness:
         target_path = (self.repo_root / target_file).resolve()
         if target_path.exists():
             content = target_path.read_text(encoding="utf-8", errors="ignore")
-            file_snapshot = f"### CONTEÚDO ATUAL DE '{target_file}':\n```python\n{content}\n```\n"
+            file_snapshot = (
+                f"### CONTEÚDO ATUAL DE '{target_file}' (PRESERVE AS FUNÇÕES JÁ EXISTENTES ABAIXO):\n"
+                f"```python\n{content}\n```\n"
+            )
 
         prompt = f"""{file_snapshot}
 ### TAREFA ATÔMICA:
@@ -187,7 +192,7 @@ class MicroHarness:
 ```
 
 {journal_text}
-Com base nisso, retorne a implementação completa e correta de '{target_file}' para que o Pytest passe.
+Com base nisso, retorne o código Python completo e válido de '{target_file}' (mantendo quaisquer funções existentes no arquivo e implementando o que foi pedido) dentro de um bloco ```python ... ``` para que o Pytest passe.
 """
         return prompt
 

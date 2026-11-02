@@ -1,0 +1,19 @@
+================================================================================
+AUTO DE INVESTIGAÇÃO PRELIMINAR E INTELIGÊNCIA POLICIAL (DOCUMENTO DE TESTE)
+================================================================================
+Unidade: Núcleo de Inteligência e Combate a Fraudes Licitatórias
+Data de Registro: 02/11/2026
+
+[OCORRÊNCIA 01 - VIGILÂNCIA DE CAMPO]
+Condutor identificado pelo CPF 111.222.333-44 estacionou a caminhonete placa BRA-2024
+em frente à sede da empresa investigada CNPJ 12.345.678/0001-90. Contato telefônico
+interceptado via ordem judicial: (69) 99234-5678 e e-mail operador.alfa@empresa-ficticia.com.br.
+
+[OCORRÊNCIA 02 - CRUZAMENTO FINANCEIRO]
+Transferência via chave PIX aleatória 123e4567-e89b-12d3-a456-426614174000 vinculada
+ao mesmo CPF 111.222.333-44 e segundo veículo de apoio placa Mercosul MER1C23.
+Segundo investigado: CPF 999.888.777-66, celular (11) 98765-4321, IP de acesso 192.168.15.42.
+
+[OCORRÊNCIA 03 - REINCIDÊNCIA DE VEÍCULO]
+A caminhonete placa BRA-2024 e o veículo MER1C23 foram registrados juntos no pedágio
+com o portador do CPF 999.888.777-66 (contato: socio.beta@empresa-ficticia.com.br).

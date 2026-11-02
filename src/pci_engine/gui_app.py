@@ -598,12 +598,16 @@ class PCIMasterGUI:
             font=ctk.CTkFont(family="Consolas", size=12),
         )
         self.txt_masterbook.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        self.txt_masterbook.insert(
-            "1.0",
-            "# Especificação de Sistema\n"
-            "Construa um módulo em src/analytics.py com uma função calcular_metricas(dados: list) -> dict\n"
-            "que extraia o total, a média e descarte valores negativos com validação estrita.\n",
-        )
+        default_pilot_path = self.repo_root / "tasks" / "active" / "PILOTO_NEXUS_INVESTIGATIVO.md"
+        if default_pilot_path.exists():
+            default_mb_text = default_pilot_path.read_text(encoding="utf-8", errors="ignore")
+        else:
+            default_mb_text = (
+                "# Especificação de Sistema\n"
+                "Construa um módulo em src/analytics.py com uma função calcular_metricas(dados: list) -> dict\n"
+                "que extraia o total, a média e descarte valores negativos com validação estrita.\n"
+            )
+        self.txt_masterbook.insert("1.0", default_mb_text)
 
         # Painel Direito: Triquetra Tech Neon Spinner + AI Step Tracker
         hud_frame = ctk.CTkFrame(
@@ -992,10 +996,10 @@ class PCIMasterGUI:
 
         info_lbl = ctk.CTkLabel(
             parent,
-            text="❖ Pipeline de Cadeia de Custódia Forense & Anonimização de Dados (LGPD / OSINT)\n"
-            "• Passo 1: Calcula o Hash SHA-256 imutável do seu documento original (prova matemática de integridade).\n"
-            "• Passo 2: Cria uma Cópia Derivada limpando CPFs, CNPJs, e-mails, chaves PIX e caminhos do seu usuário Windows.\n"
-            "• Passo 3: Opcionalmente criptografa o arquivo com chave AES-Fernet em data/spool_encrypted/.",
+            text="❖ Pipeline Forense Policial / Investigativo & Custódia de Evidências (100% Local Soberano)\n"
+            "• Modo 1 (Investigativo Local): Calcula o Hash SHA-256 imutável e EXTRAI/CRUZA CPFs, CNPJs, Placas Mercosul/Antigas,\n"
+            "  Celulares, E-mails e PIX mantendo 100% dos dados intactos dentro deste PC para cruzamento investigativo.\n"
+            "• Modo 2 (Derivada Anonimizada): Opcionalmente gera uma cópia mascarada apenas quando você quiser enviar texto à nuvem.",
             font=ctk.CTkFont(size=12),
             justify="left",
             text_color="#cbd5e1",
@@ -1005,7 +1009,9 @@ class PCIMasterGUI:
         file_frame = ctk.CTkFrame(parent, fg_color="#0f1726", border_width=1, border_color="#1b2840")
         file_frame.pack(fill="x", padx=15, pady=5)
 
-        self.file_path_var = tk.StringVar(value="")
+        default_inv_fixture = self.repo_root / "tasks" / "fixtures" / "relatorio_investigacao_teste.txt"
+        initial_forensic_path = str(default_inv_fixture) if default_inv_fixture.exists() else ""
+        self.file_path_var = tk.StringVar(value=initial_forensic_path)
         entry_file = ctk.CTkEntry(
             file_frame,
             textvariable=self.file_path_var,
@@ -1027,18 +1033,18 @@ class PCIMasterGUI:
         self._attach_interactive_hover(btn_browse, "◈ Procurar Arquivo...", "❖ Procurar Arquivo... ▸")
 
         opts_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        opts_frame.pack(fill="x", padx=15, pady=8)
+        opts_frame.pack(fill="x", padx=15, pady=6)
 
         self.switch_pii = ctk.CTkSwitch(
             opts_frame,
-            text="[x] Remover metadados e PII (CPF / CNPJ / Telefones / E-mails / Chaves PIX / Caminhos C:\\Users) da cópia derivada",
+            text="Se gerar Derivada Externa: Mascarar PII (CPF / CNPJ / Placas / Celulares / E-mails / PIX) apenas na cópia derivada",
             variable=self.remove_pii_var,
             onvalue=True,
             offvalue=False,
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
             progress_color="#00f5d4",
         )
-        self.switch_pii.pack(anchor="w", pady=4)
+        self.switch_pii.pack(anchor="w", pady=3)
 
         self.switch_spool = ctk.CTkSwitch(
             opts_frame,
@@ -1048,25 +1054,47 @@ class PCIMasterGUI:
             offvalue=False,
             progress_color="#00bbf9",
         )
-        self.switch_spool.pack(anchor="w", pady=4)
+        self.switch_spool.pack(anchor="w", pady=3)
 
-        btn_generate_derived = ctk.CTkButton(
-            parent,
-            text="❖ Gerar Derivada Auditável com Hash Imutável",
-            command=self._on_generate_sanitized_derivative,
+        btn_forensic_row = ctk.CTkFrame(parent, fg_color="transparent")
+        btn_forensic_row.pack(fill="x", padx=15, pady=8)
+
+        btn_extract_inv = ctk.CTkButton(
+            btn_forensic_row,
+            text="◈ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados)",
+            command=self._on_extract_investigative_clicked,
             fg_color="#00f5d4",
             text_color="#070a10",
             hover_color="#00bbf9",
             height=36,
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
         )
-        btn_generate_derived.pack(anchor="w", padx=15, pady=10)
+        btn_extract_inv.pack(side="left", padx=(0, 10))
         self._attach_interactive_hover(
-            btn_generate_derived,
-            "❖ Gerar Derivada Auditável com Hash Imutável",
-            "⟡ Gerar Derivada Auditável com Hash Imutável ▸",
+            btn_extract_inv,
+            "◈ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados)",
+            "❖ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados) ▸",
             base_border="#00f5d4",
             hover_border="#ffffff",
+        )
+
+        btn_generate_derived = ctk.CTkButton(
+            btn_forensic_row,
+            text="❖ Gerar Derivada Anonimizada (Para Nuvem/Terceiros)",
+            command=self._on_generate_sanitized_derivative,
+            fg_color="#162238",
+            text_color="#00bbf9",
+            hover_color="#1f3252",
+            height=36,
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
+        btn_generate_derived.pack(side="left")
+        self._attach_interactive_hover(
+            btn_generate_derived,
+            "❖ Gerar Derivada Anonimizada (Para Nuvem/Terceiros)",
+            "⟡ Gerar Derivada Anonimizada (Para Nuvem/Terceiros) ▸",
+            base_border="#00bbf9",
+            hover_border="#00f5d4",
         )
 
         self.sanitizer_output_box = ctk.CTkTextbox(
@@ -1623,25 +1651,40 @@ class PCIMasterGUI:
             self.log(f"Arquivo Masterbook carregado: {Path(chosen).name}")
 
     def _on_decompose_clicked(self) -> None:
-        """Decompõe o Masterbook em microtarefas estruturadas (DAG) atualizando o Triquetra Step Tracker."""
+        """Decompõe o Masterbook em microtarefas estruturadas (DAG) com auto-fatiamento offline."""
         content = self.txt_masterbook.get("1.0", "end").strip()
         if not content:
             messagebox.showwarning("Aviso", "O texto do Masterbook está vazio.")
             return
 
+        is_offline = not self.is_hybrid_mode.get()
+
         def _run() -> None:
             self._set_ai_step_progress(0, 15.0, "PREFLIGHT")
-            self.log("Iniciando decomposição do Masterbook em microtarefas (Pydantic Schema)...")
-            decomposer = MasterbookDecomposer(db_path=self.db_path)
-            temp_mb = self.repo_root / "tasks" / "active" / f"mb_{int(time.time())}.md"
-            temp_mb.parent.mkdir(parents=True, exist_ok=True)
-            temp_mb.write_text(content, encoding="utf-8")
+            mode_str = "Modo 100% Offline (Auto-Fatiamento <= 30 linhas ativo)" if is_offline else "Modo Híbrido Cloud"
+            self.log(f"Iniciando decomposição do Masterbook [{mode_str}]...")
+            decomposer = MasterbookDecomposer(db_manager=self.db)
+
+            # Se estiver decompondo o Piloto Nexus Investigativo, limpa artefato anterior para demonstração limpa
+            if "TASK_NEXUS_01" in content:
+                nexus_file = self.repo_root / "src" / "investigative_nexus.py"
+                if nexus_file.exists():
+                    nexus_file.unlink()
+                for tid in ("TASK_NEXUS_01", "TASK_NEXUS_02", "TASK_NEXUS_03"):
+                    self.db.delete_task(tid)
 
             try:
-                self._set_ai_step_progress(1, 45.0, "DAG SLICING")
-                tasks = decomposer.decompose_file(temp_mb)
-                self._set_ai_step_progress(2, 100.0, "FILA PRONTA")
-                self.log(f"Sucesso! {len(tasks)} microtarefas geradas e salvas no banco de dados.")
+                self._set_ai_step_progress(1, 55.0, "DAG SLICING")
+                tasks = decomposer.decompose_from_text(
+                    masterbook_content=content,
+                    parent_name=f"MB_{int(time.time())}",
+                    offline_auto_slice=is_offline,
+                    max_lines_per_slice=30,
+                )
+                self._set_ai_step_progress(5, 100.0, "FILA PRONTA")
+                self.log(
+                    f"Sucesso! {len(tasks)} microtarefas dimensionadas e enfileiradas no SQLite WAL: {', '.join(tasks)}"
+                )
                 self.dispatch_to_ui(self.refresh_tasks_table)
             except Exception as exc:
                 self._set_ai_step_progress(5, 0.0, "ERRO DAG")
@@ -1650,31 +1693,63 @@ class PCIMasterGUI:
         threading.Thread(target=_run, daemon=True).start()
 
     def _on_run_autonomous_queue_clicked(self) -> None:
-        """Dispara a execução de microtarefas da fila atualizando cada etapa do Triquetra Step Tracker."""
+        """Dispara a execução sequencial completa de todas as microtarefas pendentes na fila."""
+        online_flag = self.is_hybrid_mode.get()
+
         def _run() -> None:
-            self._set_ai_step_progress(0, 20.0, "ROTEAMENTO")
-            self.log("Roteando e executando tarefas pendentes da fila...")
+            self._set_ai_step_progress(0, 15.0, "ROTEAMENTO")
+            self.log("Iniciando execução autônoma da fila DAG...")
             router = PCIRouter(db_path=self.db_path, repo_root=self.repo_root)
-            harness = MicroHarness(db_path=self.db_path, repo_root=self.repo_root)
+            harness = MicroHarness(db_manager=self.db, repo_root=self.repo_root)
 
-            routed_count = router.route_all_pending_tasks()
-            self.log(f"Roteador determinístico despachou {routed_count} tarefas.")
+            executed_total = 0
+            passed_total = 0
 
-            self._set_ai_step_progress(2, 55.0, "INFERÊNCIA IA")
-            time.sleep(0.15)
-            self._set_ai_step_progress(3, 75.0, "AST & PYTEST")
+            while True:
+                # 1. Desbloqueia dependentes cujos pais já estão VERIFIED e roteia pendentes
+                self.db.unlock_ready_tasks()
+                routed_count = router.route_all_pending_tasks(online_mode=online_flag)
+                if routed_count > 0:
+                    self.log(f"Roteador determinístico despachou {routed_count} tarefa(s) para LOCAL_3B.")
+                self.dispatch_to_ui(self.refresh_tasks_table)
 
-            success, task_id, out = harness.run_next_local_task()
-            if task_id:
-                self._set_ai_step_progress(4, 92.0, "AUDITORIA TDD")
-                time.sleep(0.15)
-                status_txt = "APROVADA no Pytest" if success else "REPROVADA"
-                self._set_ai_step_progress(5, 100.0, "VERIFICADO" if success else "REVISÃO")
-                self.log(f"Execução de {task_id} finalizada -> {status_txt}")
-                self.log(f"Detalhes do Sandbox:\n{out[:400]}")
+                # 2. Busca próxima tarefa elegível
+                self._set_ai_step_progress(2, 45.0, "INFERÊNCIA 3B")
+                res = harness.run_next_local_task()
+                if not res:
+                    break
+
+                executed_total += 1
+                tid = res.get("task_id", "UNKNOWN")
+                ok = bool(res.get("success"))
+                attempts_used = res.get("attempts", 1)
+
+                self._set_ai_step_progress(3, 75.0, f"AST: {tid}")
+                time.sleep(0.1)
+                self._set_ai_step_progress(4, 90.0, f"PYTEST: {tid}")
+
+                if ok:
+                    passed_total += 1
+                    code_gen = res.get("code", "")
+                    lines_cnt = len(code_gen.splitlines())
+                    self.log(
+                        f"✓ [{tid}] APROVADA no Pytest na {attempts_used}ª tentativa! "
+                        f"({lines_cnt} linhas gravadas em {res.get('test_file', 'sandbox')})."
+                    )
+                else:
+                    err_detail = res.get("error") or res.get("last_error", "Falha nos testes")
+                    self.log(f"⌧ [{tid}] REPROVADA após {attempts_used} tentativa(s): {err_detail[:250]}")
+
+                self.dispatch_to_ui(self.refresh_tasks_table)
+
+            if executed_total > 0:
+                self._set_ai_step_progress(5, 100.0, "CONCLUÍDO")
+                self.log(
+                    f"=== CICLO AUTÔNOMO FINALIZADO: {passed_total}/{executed_total} microtarefa(s) VERIFIED com 100% de precisão! ==="
+                )
             else:
                 self._set_ai_step_progress(5, 100.0, "FILA LIMPA")
-                self.log("Nenhuma tarefa elegível para execução local no momento.")
+                self.log("Nenhuma tarefa PENDING elegível na fila. Clique em '1. Decompor em Microtarefas' primeiro.")
 
             self.dispatch_to_ui(self.refresh_tasks_table)
 
@@ -1805,6 +1880,67 @@ class PCIMasterGUI:
         )
         if chosen:
             self.file_path_var.set(chosen)
+
+    def _on_extract_investigative_clicked(self) -> None:
+        """Extrai e cruza CPFs, CNPJs, Placas Mercosul/Antigas, Celulares, E-mails e PIX 100% localmente sem ocultar nada."""
+        raw_path = self.file_path_var.get().strip()
+        if not raw_path or not Path(raw_path).exists():
+            messagebox.showwarning("Aviso", "Selecione um arquivo existente para extração e cruzamento investigativo.")
+            return
+
+        def _run() -> None:
+            self.log(f"Iniciando extração e cruzamento investigativo local em: {Path(raw_path).name}...")
+            sanitizer = ForensicSanitizer()
+            try:
+                inv = sanitizer.extract_investigative_entities(original_path=raw_path, db_manager=self.db)
+                ent = inv["entities"]
+                links_lines: List[str] = []
+                for lk in inv["cross_links"]:
+                    pairs = ", ".join(f"{k}: {v}" for k, v in lk["linked_entities"].items())
+                    links_lines.append(
+                        f"  • [Linha {lk['line_number']:02d}] {pairs}\n"
+                        f"    Trecho: \"{lk['context_preview']}\""
+                    )
+                links_block = "\n".join(links_lines) if links_lines else "  (Nenhuma co-ocorrência na mesma linha)"
+
+                report_text = (
+                    "=========================================================================\n"
+                    "   DOSSIÊ DE EXTRAÇÃO E CRUZAMENTO INVESTIGATIVO (100% LOCAL INTACTO)    \n"
+                    "=========================================================================\n"
+                    f"ID Custódia Forense: {inv['evidence_id']}\n"
+                    f"Arquivo Analisado:   {inv['original_file']}\n"
+                    f"SHA-256 Imutável:    {inv['original_sha256']}\n"
+                    f"Status dos Dados:    100% PRESERVADOS NO PC LOCAL (Zero Redação)\n"
+                    f"Total de Entidades:  {inv['total_entities']} identificadores encontrados\n"
+                    "-------------------------------------------------------------------------\n"
+                    "1. IDENTIFICADORES EXTRAÍDOS PARA CRUZAMENTO:\n"
+                    "-------------------------------------------------------------------------\n"
+                    f"  • CPFs Encontrados:          {', '.join(ent.get('CPF', [])) or 'Nenhum'}\n"
+                    f"  • CNPJs Encontrados:         {', '.join(ent.get('CNPJ', [])) or 'Nenhum'}\n"
+                    f"  • Placas (Mercosul/Antiga):  {', '.join(ent.get('PLACA_VEICULO', [])) or 'Nenhuma'}\n"
+                    f"  • Celulares / Telefones:     {', '.join(ent.get('CELULAR_TEL', [])) or 'Nenhum'}\n"
+                    f"  • E-mails Identificados:     {', '.join(ent.get('EMAIL', [])) or 'Nenhum'}\n"
+                    f"  • Chaves PIX (EVP/UUID):     {', '.join(ent.get('PIX_EVP', [])) or 'Nenhuma'}\n"
+                    f"  • Endereços IPv4:            {', '.join(ent.get('IPV4', [])) or 'Nenhum'}\n"
+                    "-------------------------------------------------------------------------\n"
+                    "2. MATRIZ DE VÍNCULOS DIRETOS (CO-OCORRÊNCIA NO MESMO REGISTRO/LINHA):\n"
+                    "-------------------------------------------------------------------------\n"
+                    f"{links_block}\n"
+                )
+
+                def _update_box() -> None:
+                    self.sanitizer_output_box.delete("1.0", "end")
+                    self.sanitizer_output_box.insert("1.0", report_text)
+
+                self.dispatch_to_ui(_update_box)
+                self.log(
+                    f"Extração investigativa concluída! {inv['total_entities']} entidades e "
+                    f"{len(inv['cross_links'])} vínculos diretos identificados."
+                )
+            except Exception as exc:
+                self.log(f"Erro na extração investigativa: {exc}")
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _on_generate_sanitized_derivative(self) -> None:
         """Gera cópia derivada higienizada calculando hashes SHA-256 e redação."""

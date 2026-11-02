@@ -33,11 +33,83 @@ class ForensicSanitizer:
     PATTERNS = {
         "CPF": re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b"),
         "CNPJ": re.compile(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b"),
+        "PLACA_VEICULO": re.compile(r"\b[A-Z]{3}[-\s]?(?:\d{4}|\d[A-Z]\d{2})\b"),
+        "CELULAR_TEL": re.compile(r"\b(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?(?:9\d{4}|\d{4})[-\s]?\d{4}\b"),
         "EMAIL": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b"),
+        "PIX_EVP": re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"),
         "IPV4": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
         "API_KEY": re.compile(r"\b(?:sk-[a-zA-Z0-9_-]{20,}|AIza[0-9A-Za-z-_]{35}|ghp_[a-zA-Z0-9]{36}|xox[baprs]-[0-9a-zA-Z]{10,})\b"),
         "USER_PATH": re.compile(r"[C-Z]:\\+Users\\+[^\s\"\'<>]+", re.IGNORECASE),
     }
+
+    def extract_investigative_entities(
+        self,
+        original_path: Path | str,
+        db_manager: Optional[DatabaseManager] = None,
+    ) -> Dict[str, Any]:
+        """
+        Modo Investigativo Policial / Auditoria (100% Local - Sem Ocultar Dados):
+        1. Calcula o Hash SHA-256 imutável do arquivo original e grava na cadeia de custódia.
+        2. Extrai CPFs, CNPJs, Placas de Veículos (Mercosul/Antiga), Celulares, E-mails, Chaves PIX e IPs.
+        3. Realiza o cruzamento linha a linha para apontar vínculos diretos (ex: CPF + Placa na mesma linha).
+        """
+        src_path = Path(original_path).resolve()
+        if not src_path.exists():
+            raise FileNotFoundError(f"Arquivo investigativo não encontrado: {src_path}")
+
+        orig_hash = self.sha256_file(src_path)
+        content = src_path.read_text(encoding="utf-8", errors="ignore")
+
+        investigative_keys = ("CPF", "CNPJ", "PLACA_VEICULO", "CELULAR_TEL", "EMAIL", "PIX_EVP", "IPV4")
+        entities_found: Dict[str, List[str]] = {}
+        for k in investigative_keys:
+            matches = self.PATTERNS[k].findall(content)
+            unique_matches = list(dict.fromkeys(m.strip() for m in matches if m.strip()))
+            entities_found[k] = unique_matches
+
+        # Cruzamento de vínculos por linha/parágrafo (co-ocorrência de 2+ entidades)
+        cross_links: List[Dict[str, Any]] = []
+        for idx, line in enumerate(content.splitlines(), start=1):
+            line_strip = line.strip()
+            if not line_strip:
+                continue
+            line_hits: Dict[str, List[str]] = {}
+            for k in investigative_keys:
+                found_in_line = self.PATTERNS[k].findall(line_strip)
+                if found_in_line:
+                    line_hits[k] = list(dict.fromkeys(found_in_line))
+            total_items = sum(len(v) for v in line_hits.values())
+            if total_items >= 2:
+                cross_links.append(
+                    {
+                        "line_number": idx,
+                        "linked_entities": line_hits,
+                        "context_preview": line_strip[:160],
+                    }
+                )
+
+        ev_id = f"EVID_INV_{uuid.uuid4().hex[:8].upper()}"
+        if db_manager:
+            db_manager.register_evidence(
+                evidence_id=ev_id,
+                original_sha256=orig_hash,
+                source_url=f"file://{src_path.name}",
+                custody_status="INVESTIGATIVE_LOCAL_INTACT",
+                derivative_sha256=orig_hash,
+                metadata_stripped=False,
+                stripped_categories="NONE_PRESERVED_FOR_CROSSREF",
+                tool_version="PCI-Investigative-v2.2",
+                drive_sync_status="STRICT_LOCAL_ONLY",
+            )
+
+        return {
+            "evidence_id": ev_id,
+            "original_file": src_path.name,
+            "original_sha256": orig_hash,
+            "entities": entities_found,
+            "cross_links": cross_links,
+            "total_entities": sum(len(v) for v in entities_found.values()),
+        }
 
     @staticmethod
     def sha256_file(filepath: Path | str) -> str:

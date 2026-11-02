@@ -59,9 +59,78 @@ class MasterbookDecomposer:
     e importa tarefas manuais (.md) da pasta tasks/active/.
     """
 
-    def __init__(self, db_manager: DatabaseManager, default_ollama_url: str = "http://127.0.0.1:11434"):
-        self.db = db_manager
+    def __init__(
+        self,
+        db_manager: Optional[DatabaseManager] = None,
+        db_path: Optional[Path | str] = None,
+        default_ollama_url: str = "http://127.0.0.1:11434",
+    ):
+        if db_manager is not None:
+            self.db = db_manager
+        elif db_path is not None:
+            self.db = DatabaseManager(db_path=db_path)
+        else:
+            self.db = DatabaseManager()
         self.ollama_url = default_ollama_url
+
+    # -------------------------------------------------------------------------
+    # 0. Auto-Fatiador de Tarefas Grandes para Modo Offline (<= 30 linhas)
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def auto_slice_oversized_tasks(
+        tasks: List[MicrotaskDefinition],
+        max_lines_per_slice: int = 30,
+    ) -> List[MicrotaskDefinition]:
+        """
+        Quando operando 100% Offline (sem API Cloud), divide tarefas grandes (> max_lines_per_slice)
+        em fatias atômicas encadeadas do tamanho ideal (<= 30 linhas) para o MicroHarness / Aider local.
+        """
+        sliced_list: List[MicrotaskDefinition] = []
+        last_final_id_map: Dict[str, str] = {}
+
+        for task in tasks:
+            # Ajusta dependência caso a tarefa anterior tenha sido fatiada
+            effective_dep = last_final_id_map.get(task.depends_on_task_id, task.depends_on_task_id) if task.depends_on_task_id else None
+
+            if task.estimated_lines <= max_lines_per_slice:
+                updated = task.model_copy(update={"depends_on_task_id": effective_dep})
+                sliced_list.append(updated)
+                last_final_id_map[task.task_id] = task.task_id
+                continue
+
+            # Calcula quantas fatias de <= max_lines_per_slice são necessárias
+            num_slices = max(2, (task.estimated_lines + max_lines_per_slice - 1) // max_lines_per_slice)
+            spec_lines = [ln for ln in task.spec_markdown.splitlines() if ln.strip()]
+            chunk_size = max(1, (len(spec_lines) + num_slices - 1) // num_slices)
+
+            prev_slice_id = effective_dep
+            for s_idx in range(num_slices):
+                slice_id = f"{task.task_id}_PT{s_idx + 1}"
+                sub_spec_lines = spec_lines[s_idx * chunk_size : (s_idx + 1) * chunk_size]
+                sub_spec = (
+                    f"[Fatia {s_idx + 1}/{num_slices} da tarefa {task.task_id} — Dimensionada para <= {max_lines_per_slice} linhas]\n"
+                    + "\n".join(sub_spec_lines)
+                    + f"\n\nContexto global da especificação:\n{task.spec_markdown}"
+                )
+                slice_task = MicrotaskDefinition(
+                    task_id=slice_id,
+                    depends_on_task_id=prev_slice_id,
+                    task_type=task.task_type if task.task_type != "REFACTOR" else "CRUD",
+                    privacy_level=task.privacy_level,
+                    permission_level=task.permission_level,
+                    estimated_lines=min(max_lines_per_slice, max(15, task.estimated_lines // num_slices)),
+                    target_file_path=task.target_file_path,
+                    spec_markdown=sub_spec,
+                    test_code=task.test_code,
+                    max_attempts=task.max_attempts,
+                )
+                sliced_list.append(slice_task)
+                prev_slice_id = slice_id
+
+            if prev_slice_id:
+                last_final_id_map[task.task_id] = prev_slice_id
+
+        return sliced_list
 
     # -------------------------------------------------------------------------
     # 1. Decomposição com Saída Estruturada Forçada (JSON Schema / GBNF)
@@ -72,16 +141,29 @@ class MasterbookDecomposer:
         parent_name: str = "MASTERBOOK_PILOTO",
         model: str = "qwen2.5-coder:3b",
         force_fallback: bool = False,
+        offline_auto_slice: bool = False,
+        max_lines_per_slice: int = 30,
     ) -> List[str]:
         """
-        Gera a decomposição forçando format=JSON_SCHEMA no Ollama local.
-        Insere cada tarefa validada na tabela tasks_queue do jobs.db.
+        Gera a decomposição forçando format=JSON_SCHEMA no Ollama local (ou parser determinístico
+        se o Masterbook já possuir marcadores '### TAREFA').
+        Se offline_auto_slice=True, reparte automaticamente tarefas grandes (> max_lines_per_slice)
+        em fatias ideais (<= 30 linhas) para o MicroHarness / Aider local.
         """
+        # Se o Masterbook já contém blocos explícitos '### TAREFA', usa o parser determinístico exato
+        if "### TAREFA" in masterbook_content:
+            return self._deterministic_parse_and_persist(
+                masterbook_content,
+                parent_name,
+                offline_auto_slice=offline_auto_slice,
+                max_lines_per_slice=max_lines_per_slice,
+            )
+
         if not force_fallback:
             json_schema = MasterbookDecompositionResult.model_json_schema()
             prompt = (
                 f"Analise o Masterbook abaixo e decomponha em uma lista ordenada de microtarefas atômicas (DAG).\n"
-                f"Cada tarefa deve ter menos de 35 linhas e ter teste unitário em Pytest completo.\n\n"
+                f"Cada tarefa deve ter no máximo {max_lines_per_slice} linhas e ter teste unitário em Pytest completo.\n\n"
                 f"MASTERBOOK:\n{masterbook_content}\n"
             )
 
@@ -104,18 +186,29 @@ class MasterbookDecomposer:
                     resp_data = json.loads(resp.read().decode("utf-8"))
                     raw_json = resp_data.get("message", {}).get("content", "")
                     validated = MasterbookDecompositionResult.model_validate_json(raw_json)
+                    if offline_auto_slice:
+                        validated.tasks = self.auto_slice_oversized_tasks(
+                            validated.tasks, max_lines_per_slice=max_lines_per_slice
+                        )
                     return self._persist_tasks(validated)
             except Exception as exc:
                 logger.warning(f"Ollama estruturado indisponível ({exc}). Acionando parser determinístico.")
 
         # Fallback determinístico (Sem IA)
-        return self._deterministic_parse_and_persist(masterbook_content, parent_name)
+        return self._deterministic_parse_and_persist(
+            masterbook_content,
+            parent_name,
+            offline_auto_slice=offline_auto_slice,
+            max_lines_per_slice=max_lines_per_slice,
+        )
 
     def decompose_file(
         self,
         file_path: Path | str,
         model: str = "qwen2.5-coder:3b",
         force_fallback: bool = False,
+        offline_auto_slice: bool = False,
+        max_lines_per_slice: int = 30,
     ) -> List[str]:
         path = Path(file_path).resolve()
         content = path.read_text(encoding="utf-8")
@@ -124,6 +217,8 @@ class MasterbookDecomposer:
             parent_name=path.stem,
             model=model,
             force_fallback=force_fallback,
+            offline_auto_slice=offline_auto_slice,
+            max_lines_per_slice=max_lines_per_slice,
         )
 
     def _persist_tasks(self, result: MasterbookDecompositionResult) -> List[str]:
@@ -147,9 +242,15 @@ class MasterbookDecomposer:
             enqueued_ids.append(task.task_id)
         return enqueued_ids
 
-    def _deterministic_parse_and_persist(self, content: str, parent_name: str) -> List[str]:
-        """Extrai tarefas delimitadas por marcadores '### TAREFA' no Markdown."""
-        enqueued_ids = []
+    def _deterministic_parse_and_persist(
+        self,
+        content: str,
+        parent_name: str,
+        offline_auto_slice: bool = False,
+        max_lines_per_slice: int = 30,
+    ) -> List[str]:
+        """Extrai tarefas delimitadas por marcadores '### TAREFA' no Markdown e aplica auto-fatiamento se offline."""
+        parsed_defs: List[MicrotaskDefinition] = []
         task_blocks = re.split(r"(?=### TAREFA\s+)", content)
         prev_task_id = None
 
@@ -170,7 +271,7 @@ class MasterbookDecomposer:
             privacy = privacy_match.group(1).strip() if privacy_match else "PUBLIC"
 
             lines_match = re.search(r"(?:Linhas|Lines):\s*(\d+)", block, re.IGNORECASE)
-            lines = int(lines_match.group(1)) if lines_match else 25
+            est_lines = int(lines_match.group(1)) if lines_match else 25
 
             type_match = re.search(r"(?:Tipo|Type):\s*`?([A-Z_]+)`?", block, re.IGNORECASE)
             task_type = type_match.group(1).strip() if type_match else "EXTRACTION"
@@ -179,25 +280,27 @@ class MasterbookDecomposer:
             py_blocks = re.findall(r"```python(.*?)```", block, re.DOTALL)
             test_code = py_blocks[-1].strip() if py_blocks else "def test_auto(): assert True\n"
 
-            initial_status = "WAITING_DEPS" if prev_task_id else "PENDING"
-            self.db.insert_task(
-                task_id=task_id,
-                parent_masterbook=parent_name,
-                depends_on_task_id=prev_task_id,
-                task_type=task_type,
-                privacy_level=privacy,
-                permission_level=2,
-                estimated_lines=lines,
-                spec_markdown=block,
-                test_code=test_code,
-                target_file_path=target_file,
-                status=initial_status,
-                max_attempts=3,
+            parsed_defs.append(
+                MicrotaskDefinition(
+                    task_id=task_id,
+                    depends_on_task_id=prev_task_id,
+                    task_type=task_type,
+                    privacy_level=privacy,
+                    permission_level=2,
+                    estimated_lines=est_lines,
+                    target_file_path=target_file,
+                    spec_markdown=block,
+                    test_code=test_code,
+                    max_attempts=3,
+                )
             )
-            enqueued_ids.append(task_id)
             prev_task_id = task_id
 
-        return enqueued_ids
+        if offline_auto_slice and parsed_defs:
+            parsed_defs = self.auto_slice_oversized_tasks(parsed_defs, max_lines_per_slice=max_lines_per_slice)
+
+        result_obj = MasterbookDecompositionResult(parent_masterbook=parent_name, tasks=parsed_defs)
+        return self._persist_tasks(result_obj)
 
     # -------------------------------------------------------------------------
     # 2. Importação Manual de Arquivos .md (tasks/active/)
