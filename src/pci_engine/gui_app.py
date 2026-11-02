@@ -884,21 +884,41 @@ class PCIMasterGUI:
 
         self.btn_run_queue = ctk.CTkButton(
             action_bar,
-            text="2. ⟡ Iniciar Execução Autônoma",
+            text="2. ⟡ Execução Autônoma",
             command=self._on_run_autonomous_queue_clicked,
             fg_color="#ff007f",
             text_color="#ffffff",
             hover_color="#d90467",
             font=ctk.CTkFont(size=12, weight="bold"),
-            width=220,
+            width=180,
             height=32,
         )
         self.btn_run_queue.grid(row=0, column=1, padx=4, sticky="w")
         self._attach_interactive_hover(
             self.btn_run_queue,
-            "2. ⟡ Iniciar Execução Autônoma",
-            "2. ❖ Iniciar Execução Autônoma ▸",
+            "2. ⟡ Execução Autônoma",
+            "2. ❖ Execução Autônoma ▸",
             base_border="#ff007f",
+            hover_border="#00f5d4",
+        )
+
+        self.btn_run_mtv = ctk.CTkButton(
+            action_bar,
+            text="3. ⚝ Executar MTV (Best-of-N)",
+            command=self._on_run_mtv_batch_clicked,
+            fg_color="#7209b7",
+            text_color="#ffffff",
+            hover_color="#560bad",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            width=200,
+            height=32,
+        )
+        self.btn_run_mtv.grid(row=0, column=2, padx=4, sticky="w")
+        self._attach_interactive_hover(
+            self.btn_run_mtv,
+            "3. ⚝ Executar MTV (Best-of-N)",
+            "3. ❖ Executar MTV (Best-of-N) ▸",
+            base_border="#7209b7",
             hover_border="#00f5d4",
         )
 
@@ -1974,6 +1994,59 @@ class PCIMasterGUI:
                 self.log(f"Erro na decomposição: {exc}")
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def _on_run_mtv_batch_clicked(self) -> None:
+        """Executa o motor MTV (Micro-Tarefas Verificadas / Best-of-N) nas tarefas em tasks/."""
+        tasks_dir = self.repo_root / "tasks"
+        task_folders = [d for d in tasks_dir.iterdir() if d.is_dir() and (d / "task.md").exists() and list(d.glob("test_*.py"))]
+        
+        if not task_folders:
+            self.log("Nenhuma micro-tarefa com task.md e test_*.py encontrada na pasta tasks/.")
+            if not self.headless_test:
+                messagebox.showinfo("MTV", "Nenhuma micro-tarefa pronta encontrada em tasks/ (precisa de task.md e test_*.py).")
+            return
+
+        self.log(f"Iniciando Motor MTV Best-of-N em {len(task_folders)} micro-tarefa(s)...")
+        self._set_ai_step_progress(2, 40.0, "MTV GERAÇÃO")
+
+        def _worker():
+            from pci_engine.mtv_core import make_ollama_generator, solve_task
+            try:
+                gen = make_ollama_generator(host="http://127.0.0.1:11434", model="huihui_ai/qwen2.5-coder-abliterate:3b")
+            except Exception as e:
+                self.log(f"Erro ao inicializar gerador Ollama: {e}")
+                self._set_ai_step_progress(5, 100.0, "FALHA OLLAMA")
+                return
+
+            out_dir = self.repo_root / "mtv_out"
+            out_dir.mkdir(exist_ok=True)
+            success_count = 0
+
+            for tf in task_folders:
+                self.log(f"[MTV] Processando micro-tarefa: {tf.name}...")
+                self.dispatch_to_ui(lambda: self._set_ai_step_progress(3, 70.0, f"MTV: {tf.name}"))
+                try:
+                    passed = solve_task(
+                        task_dir=tf,
+                        out_dir=out_dir,
+                        generator=gen,
+                        n=3,
+                        model="qwen2.5-coder:3b",
+                        log=self.log,
+                    )
+                    if passed:
+                        success_count += 1
+                        self.log(f"✓ [MTV] Micro-tarefa '{tf.name}' APROVADA no Pytest Oráculo!")
+                    else:
+                        self.log(f"⌧ [MTV] Micro-tarefa '{tf.name}' falhou em todas as tentativas Best-of-N.")
+                except Exception as ex:
+                    self.log(f"Erro ao resolver {tf.name} via MTV: {ex}")
+
+            self.dispatch_to_ui(lambda: self._set_ai_step_progress(5, 100.0, "MTV CONCLUÍDO"))
+            self.log(f"=== MTV FINALIZADO: {success_count}/{len(task_folders)} micro-tarefa(s) resolvidas com 100% PASS! ===")
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_run_autonomous_queue_clicked(self) -> None:
         """Dispara a execução sequencial completa de todas as microtarefas pendentes na fila."""
