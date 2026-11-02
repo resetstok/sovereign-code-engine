@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=65.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sovereign-code-engine"
+version = "1.0.0"
+description = "Sovereign Self-Hosted AI Programming Engine for Low-Spec Hardware (8GB RAM, 4GB VRAM)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "resetstok", email = "resetstokworld@gmail.com" }
+]
+dependencies = [
+    "psutil>=5.9.0",
+    "pytest>=8.0.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.scripts]
+code-engine = "code_engine.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

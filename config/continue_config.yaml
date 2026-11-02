@@ -1,0 +1,45 @@
+# =============================================================================
+# CONTINUE.DEV CONFIGURATION - SOVEREIGN CODE ENGINE
+# Copie ou mescle este arquivo com ~/.continue/config.yaml
+# =============================================================================
+name: Sovereign Config
+version: 1.0.0
+schema: v1
+
+models:
+  # MODELO LOCAL PRINCIPAL: Qwen2.5-Coder 3B (Cabe 100% na VRAM da GTX 1650)
+  - name: Local Qwen2.5-Coder 3B
+    provider: ollama
+    model: huihui_ai/qwen2.5-coder-abliterate:3b
+    apiBase: http://127.0.0.1:11434
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      contextLength: 4096
+      maxTokens: 2048
+      temperature: 0.2
+
+  # MODELO DE AUTOCOMPLETE ULTRA-RÁPIDO (1.5B)
+  - name: Local Qwen2.5-Coder 1.5B
+    provider: ollama
+    model: qwen2.5-coder:1.5b
+    apiBase: http://127.0.0.1:11434
+    roles:
+      - autocomplete
+    defaultCompletionOptions:
+      contextLength: 2048
+      maxTokens: 128
+      temperature: 0.1
+
+  # MODELO NUVEM GRATUITO (Para Arquitetura e Fatiamento quando houver internet)
+  - name: Gemini 3 Flash Free
+    provider: gemini
+    model: gemini-2.5-flash
+    apiKey: SUA_CHAVE_GEMINI_AQUI
+    roles:
+      - chat
+    defaultCompletionOptions:
+      contextLength: 1048576
+      maxTokens: 8192

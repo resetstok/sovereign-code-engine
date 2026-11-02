@@ -1,0 +1,23 @@
+# =============================================================================
+# SOVEREIGN CODE ENGINE - AIDER LOCAL CONFIGURATION
+# Otimizado para GTX 1650 (4GB VRAM) e 8GB RAM (Sem vazamento de contexto)
+# =============================================================================
+
+# Modelo Local padrão no Ollama
+model: ollama/huihui_ai/qwen2.5-coder-abliterate:3b
+
+# Contenção de Contexto: Desativa mapa de repositório pesado para não cegar o modelo 3B
+map-tokens: 0
+
+# TDD Autônomo: Testa automaticamente após cada alteração do modelo
+auto-test: true
+test-cmd: pytest -q --tb=short
+
+# Controle de Versão: Commits atômicos somente quando os testes passarem
+auto-commits: true
+commit-language: pt-BR
+
+# Estilo e Interface
+dark-mode: true
+encoding: utf-8
+stream: true
