@@ -73,14 +73,22 @@ class DriveSyncManager:
         return shutil.which("rclone") is not None
 
     def list_pending_packages(self) -> List[Path]:
-        """Lista todos os pacotes criptografados pendentes no spool local."""
+        """Lista todos os pacotes criptografados pendentes no spool local (incluindo subpastas de nós doadores)."""
         if not self.spool_dir.exists():
             return []
         packages = []
-        for p in self.spool_dir.glob("*"):
-            if p.is_file() and not p.name.endswith(".tmp"):
+        for p in self.spool_dir.rglob("*"):
+            if p.is_file() and not p.name.endswith(".tmp") and not p.name.startswith("."):
                 packages.append(p)
         return sorted(packages, key=lambda x: x.stat().st_mtime)
+
+    def _get_remote_target(self, file_path: Path) -> str:
+        """Determina o caminho de destino no Google Drive preservando a subpasta do nó doador."""
+        try:
+            rel_path = file_path.resolve().relative_to(self.spool_dir.resolve())
+            return f"{self.remote_dest.rstrip('/')}/{rel_path.as_posix()}"
+        except ValueError:
+            return f"{self.remote_dest.rstrip('/')}/{file_path.name}"
 
     @staticmethod
     def calculate_file_hashes(file_path: Path) -> Dict[str, str]:
@@ -102,7 +110,7 @@ class DriveSyncManager:
         Envia um único pacote criptografado para o Google Drive via 'rclone copyto'.
         Retorna (sucesso, mensagem).
         """
-        remote_target = f"{self.remote_dest.rstrip('/')}/{file_path.name}"
+        remote_target = self._get_remote_target(file_path)
         cmd = ["rclone", "copyto", str(file_path), remote_target]
 
         try:
@@ -120,7 +128,7 @@ class DriveSyncManager:
         Verifica a integridade do pacote no Google Drive antes de apagar o arquivo local.
         Compara tamanho e hash MD5 remoto via 'rclone md5sum' ou 'rclone size'.
         """
-        remote_target = f"{self.remote_dest.rstrip('/')}/{file_path.name}"
+        remote_target = self._get_remote_target(file_path)
         local_info = self.calculate_file_hashes(file_path)
 
         # 1. Verifica existência e tamanho remoto via rclone size
@@ -208,6 +216,13 @@ class DriveSyncManager:
                     pkg.unlink()
                     freed_bytes += file_size
                     logger.info(f"Pacote {pkg.name} sincronizado, verificado e removido do spool local.")
+                    parent_dir = pkg.parent
+                    if parent_dir != self.spool_dir:
+                        try:
+                            if not any(parent_dir.iterdir()):
+                                parent_dir.rmdir()
+                        except Exception:
+                            pass
                 except Exception as exc:
                     logger.warning(f"Erro ao remover arquivo local {pkg.name}: {exc}")
 
@@ -224,7 +239,7 @@ class DriveSyncManager:
                 try:
                     self.db.record_evidence(
                         task_id=f"SPOOL_SYNC_{pkg.stem}",
-                        file_path=f"{self.remote_dest}/{pkg.name}",
+                        file_path=self._get_remote_target(pkg),
                         sha256_hash=local_hashes["sha256"],
                         signature_status="VERIFIED_REMOTE_CLOUD",
                     )

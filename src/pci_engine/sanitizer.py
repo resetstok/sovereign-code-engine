@@ -264,3 +264,27 @@ class ForensicSanitizer:
 
         out_path.write_bytes(decrypted_bytes)
         return out_path
+
+    def pack_donor_investigative_extraction(
+        self,
+        node_name: str,
+        raw_data: str | bytes | dict,
+        password: Optional[str] = None,
+        spool_dir: Path | str = "data/spool_encrypted",
+        db_manager: Optional[DatabaseManager] = None,
+        evidence_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Tranca dados sensíveis de nós doadores (com CPFs, e-mails e CNPJs intactos)
+        em subpasta própria nomeada com a identidade do nó doador, protegida por senha.
+        """
+        from pci_engine.context_guard import ContextGuard
+        repo_root = Path(spool_dir).resolve().parent.parent
+        return ContextGuard.pack_sensitive_donor_extraction(
+            node_name=node_name,
+            raw_data=raw_data,
+            password=password,
+            repo_root=repo_root,
+            db_manager=db_manager,
+            evidence_id=evidence_id,
+        )

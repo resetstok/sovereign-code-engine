@@ -14,7 +14,9 @@ Oferece controle explícito com ou sem filtro por meio de chave/botão do operad
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import logging
 import os
 import re
@@ -22,7 +24,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger("pci_engine.context_guard")
 
@@ -53,6 +57,166 @@ class ContextGuard:
     """Guarda de contexto e custódia segura com seletor operacional (com ou sem filtro)."""
 
     KEY_FILE = Path("config/spool_fernet.key")
+    OPERATOR_PASSWORD_FILE = Path("config/operator_vault.secret")
+    DEFAULT_OPERATOR_PASSWORD = "PCI_MASTER_INVESTIGATION_KEY_2026"
+
+    @classmethod
+    def get_or_set_operator_password(
+        cls,
+        password: Optional[str] = None,
+        repo_root: Optional[Path | str] = None,
+    ) -> str:
+        """
+        Define ou recupera a senha de criptografia escolhida pelo operador.
+        Se informada, salva no arquivo config/operator_vault.secret.
+        Caso contrário, consulta o arquivo, a variável de ambiente PCI_OPERATOR_PASSWORD ou o padrão.
+        """
+        root = Path(repo_root) if repo_root else Path(".")
+        secret_path = (root / cls.OPERATOR_PASSWORD_FILE).resolve()
+
+        if password and password.strip():
+            secret_path.parent.mkdir(parents=True, exist_ok=True)
+            secret_path.write_text(password.strip(), encoding="utf-8")
+            return password.strip()
+
+        if secret_path.exists():
+            val = secret_path.read_text(encoding="utf-8").strip()
+            if val:
+                return val
+
+        env_pwd = os.getenv("PCI_OPERATOR_PASSWORD")
+        if env_pwd and env_pwd.strip():
+            return env_pwd.strip()
+
+        return cls.DEFAULT_OPERATOR_PASSWORD
+
+    @staticmethod
+    def derive_key_from_password(password: str, salt: bytes) -> bytes:
+        """Deriva chave Fernet de 32 bytes através de PBKDF2-HMAC-SHA256 (100.000 iterações)."""
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        return base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
+
+    @classmethod
+    def encrypt_with_password(cls, data: bytes | str, password: str) -> bytes:
+        """Criptografa bytes ou string com a senha do operador usando PBKDF2 + Fernet AES."""
+        raw_bytes = data.encode("utf-8") if isinstance(data, str) else data
+        salt = os.urandom(16)
+        key = cls.derive_key_from_password(password, salt)
+        fernet = Fernet(key)
+        encrypted_data = fernet.encrypt(raw_bytes)
+        # Formato binário fixo: MAGIC(14B: b"PCI_VAULT_V1\x00") + SALT(16B) + CIPHERTEXT
+        return b"PCI_VAULT_V1\x00" + salt + encrypted_data
+
+    @classmethod
+    def decrypt_with_password(cls, payload: bytes, password: str) -> bytes:
+        """Decifra payload criptografado conferindo a senha e integridade com a chave derivada."""
+        prefix = b"PCI_VAULT_V1\x00"
+        if not payload.startswith(prefix):
+            raise ValueError("Formato de pacote inválido ou cabeçalho de cofre não reconhecido.")
+
+        remainder = payload[len(prefix):]
+        if len(remainder) < 16:
+            raise ValueError("Estrutura do cofre corrompida: tamanho insuficiente.")
+
+        salt = remainder[:16]
+        encrypted_data = remainder[16:]
+        key = cls.derive_key_from_password(password, salt)
+        fernet = Fernet(key)
+        try:
+            return fernet.decrypt(encrypted_data)
+        except InvalidToken as exc:
+            raise ValueError("Senha incorreta ou integridade do pacote violada.") from exc
+
+    @classmethod
+    def pack_sensitive_donor_extraction(
+        cls,
+        node_name: str,
+        raw_data: str | bytes | dict,
+        password: Optional[str] = None,
+        repo_root: Optional[Path | str] = None,
+        db_manager: Optional[Any] = None,
+        evidence_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Tranca dados sensíveis extraídos por um nó doador em uma pasta identificada pelo nome do nó:
+        data/spool_encrypted/<nome_do_nó>/
+        Utiliza a senha escolhida pelo operador para criptografia militar PBKDF2 + Fernet AES.
+        Pronto para envio assíncrono ao Google Drive na subpasta correspondente ao doador.
+        """
+        root = Path(repo_root) if repo_root else Path(".")
+        safe_node_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", str(node_name or "PC_DOADOR_DESCONHECIDO"))
+
+        # Pasta exclusiva no spool com o nome do nó doador
+        node_spool_dir = (root / "data" / "spool_encrypted" / safe_node_name).resolve()
+        node_spool_dir.mkdir(parents=True, exist_ok=True)
+
+        if isinstance(raw_data, dict):
+            raw_bytes = json.dumps(raw_data, ensure_ascii=False, indent=2).encode("utf-8")
+        elif isinstance(raw_data, str):
+            raw_bytes = raw_data.encode("utf-8")
+        else:
+            raw_bytes = bytes(raw_data)
+
+        raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+        chosen_password = password or cls.get_or_set_operator_password(repo_root=root)
+
+        # Criptografa estritamente com a senha do operador
+        encrypted_payload = cls.encrypt_with_password(raw_bytes, chosen_password)
+        enc_sha256 = hashlib.sha256(encrypted_payload).hexdigest()
+
+        eid = evidence_id or f"SENSITIVE_{task_id or uuid.uuid4().hex[:8].upper()}"
+        out_filename = f"{eid}_{safe_node_name}_{raw_sha256[:8]}.enc"
+        out_file = node_spool_dir / out_filename
+        out_file.write_bytes(encrypted_payload)
+
+        # Registra formalmente na cadeia de custódia
+        if db_manager and hasattr(db_manager, "register_evidence"):
+            try:
+                db_manager.register_evidence(
+                    evidence_id=eid,
+                    original_sha256=raw_sha256,
+                    source_url=f"spool://{safe_node_name}/{out_filename}",
+                    custody_status="FULL_BYTES_STORED",
+                    derivative_sha256=enc_sha256,
+                    metadata_stripped=False,
+                    stripped_categories=f"DONOR_INVESTIGATIVE_PASSWORD_LOCKED:{safe_node_name}",
+                    tool_version="ContextGuard-DonorVault-v2.3",
+                    drive_sync_status="LOCAL_SPOOL",
+                )
+            except Exception as exc:
+                logger.warning(f"Erro ao registrar manifest do doador no jobs.db: {exc}")
+
+        return {
+            "status": "ENCRYPTED_IN_DONOR_SPOOL",
+            "node_name": safe_node_name,
+            "evidence_id": eid,
+            "spool_file": str(out_file),
+            "relative_spool_path": f"{safe_node_name}/{out_filename}",
+            "original_sha256": raw_sha256,
+            "encrypted_sha256": enc_sha256,
+            "raw_bytes_count": len(raw_bytes),
+            "encrypted_bytes_count": len(encrypted_payload),
+            "protected_by_operator_password": True,
+        }
+
+    @classmethod
+    def get_or_set_operator_password(cls, repo_root: Optional[Path | str] = None) -> str:
+        """Obtém ou gera a senha/chave de custódia do operador para trancar o spool."""
+        root = Path(repo_root) if repo_root else Path(".")
+        pass_file = (root / "config" / "operator_password.secret").resolve()
+        if pass_file.exists():
+            return pass_file.read_text(encoding="utf-8").strip()
+        import secrets
+        pwd = secrets.token_urlsafe(16)
+        pass_file.parent.mkdir(parents=True, exist_ok=True)
+        pass_file.write_text(pwd, encoding="utf-8")
+        return pwd
 
     @classmethod
     def get_or_create_spool_key(cls, repo_root: Optional[Path | str] = None) -> bytes:

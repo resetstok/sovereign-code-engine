@@ -34,6 +34,7 @@ for _p in (str(_REPO_ROOT), str(_SRC_DIR)):
 import customtkinter as ctk
 
 from pci_engine.benchmark_runner import BenchmarkRunner
+from pci_engine.context_guard import ContextGuard
 from pci_engine.database import DatabaseManager
 from pci_engine.decomposer import MasterbookDecomposer
 from pci_engine.drive_sync import DriveSyncManager
@@ -43,6 +44,8 @@ from pci_engine.preflight import PreflightChecker
 from pci_engine.ram_liberator import RAMLiberator
 from pci_engine.router import PCIRouter
 from pci_engine.sanitizer import ForensicSanitizer
+from pci_engine.context_guard import ContextGuard
+from pci_engine.aider_runner import AiderRunner
 from pci_engine.workspace_bridge import WorkspaceBridge, ExportReceipt
 
 # Configuração visual global CustomTkinter
@@ -127,6 +130,7 @@ class PCIMasterGUI:
         self.is_broker_running = tk.BooleanVar(value=False)
         self.remove_pii_var = tk.BooleanVar(value=True)
         self.encrypt_spool_var = tk.BooleanVar(value=True)
+        self.operator_password_var = tk.StringVar(value=ContextGuard.get_or_set_operator_password(repo_root=self.repo_root))
         self.task_filter_var = tk.StringVar(value="Todas")
         self.selected_provider_var = tk.StringVar(value="Google Gemini")
         self._broker_process: Optional[subprocess.Popen] = None
@@ -137,6 +141,7 @@ class PCIMasterGUI:
             default_target_ws = self.repo_root
         self.target_workspace_var = tk.StringVar(value=str(default_target_ws))
         self.workspace_bridge = WorkspaceBridge(default_target_ws)
+        self.aider_runner = AiderRunner(self.repo_root)
 
         # Variáveis de texto reativas para telemetria na barra lateral
         self.ram_text_var = tk.StringVar(value="RAM: Inicializando...")
@@ -603,6 +608,7 @@ class PCIMasterGUI:
         self.tab_forensic = self.tabview.add("Custódia Forense & OSINT")
         self.tab_donors = self.tabview.add("Rede de Doadores & Matriz")
         self.tab_nightly = self.tabview.add("Colibrì Noturno & Sync")
+        self.tab_aider = self.tabview.add("Aider CLI & Architect")
 
         # Ajusta altura e largura das abas sem alterar o texto pós-cálculo para não cortar letras
         try:
@@ -617,6 +623,7 @@ class PCIMasterGUI:
         self._build_tab_forensic(self.tab_forensic)
         self._build_tab_donors(self.tab_donors)
         self._build_tab_nightly(self.tab_nightly)
+        self._build_tab_aider(self.tab_aider)
 
     def _draw_dev_tech_header_lines(self, event: Any = None) -> None:
         """Desenha traços geométricos minimalistas estilo Dev-Tech Cyberpunk no topo do painel."""
@@ -1211,6 +1218,38 @@ class PCIMasterGUI:
         )
         self.switch_spool.pack(anchor="w", pady=3)
 
+        pwd_row = ctk.CTkFrame(opts_frame, fg_color="transparent")
+        pwd_row.pack(fill="x", pady=(4, 2))
+
+        ctk.CTkLabel(
+            pwd_row,
+            text="Senha do Operador (Tranca Criptográfica de Arquivos para o Drive):",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#f77f00",
+        ).pack(side="left", padx=(0, 10))
+
+        self.entry_operator_password = ctk.CTkEntry(
+            pwd_row,
+            textvariable=self.operator_password_var,
+            show="*",
+            width=260,
+            height=28,
+            font=ctk.CTkFont(family="Consolas", size=11),
+        )
+        self.entry_operator_password.pack(side="left", padx=(0, 8))
+
+        btn_toggle_pwd = ctk.CTkButton(
+            pwd_row,
+            text="👁 Ver/Ocultar",
+            width=90,
+            height=28,
+            command=self._toggle_operator_password_visibility,
+            fg_color="#1a273b",
+            hover_color="#2b3b55",
+            font=ctk.CTkFont(size=11),
+        )
+        btn_toggle_pwd.pack(side="left")
+
         btn_forensic_row = ctk.CTkFrame(parent, fg_color="transparent")
         btn_forensic_row.pack(fill="x", padx=15, pady=8)
 
@@ -1244,6 +1283,24 @@ class PCIMasterGUI:
             font=ctk.CTkFont(size=12, weight="bold"),
         )
         btn_generate_derived.pack(side="left", padx=(0, 10))
+        btn_lock_donor_vault = ctk.CTkButton(
+            btn_forensic_row,
+            text="❖ Trancar Extração com Senha do Operador (Pasta do Doador)",
+            command=self._on_lock_donor_vault_clicked,
+            fg_color="#7209b7",
+            text_color="#ffffff",
+            hover_color="#560bad",
+            height=36,
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
+        btn_lock_donor_vault.pack(side="left", padx=(0, 10))
+        self._attach_interactive_hover(
+            btn_lock_donor_vault,
+            "❖ Trancar Extração com Senha do Operador (Pasta do Doador)",
+            "❖ Trancar Extração com Senha do Operador (Pasta do Doador) ➔",
+            base_border="#7209b7",
+            hover_border="#00f5d4",
+        )
         self._attach_interactive_hover(
             btn_generate_derived,
             "❖ Trancar e Salvar no Spool Cifrado",
@@ -2240,6 +2297,52 @@ class PCIMasterGUI:
 
         threading.Thread(target=_run, daemon=True).start()
 
+    def _toggle_operator_password_visibility(self) -> None:
+        """Alterna a visibilidade da senha do operador entre texto plano e asteriscos."""
+        if hasattr(self, "entry_operator_password"):
+            current = self.entry_operator_password.cget("show")
+            self.entry_operator_password.configure(show="" if current == "*" else "*")
+
+    def _on_lock_donor_vault_clicked(self) -> None:
+        """Tranca os dados extraídos na pasta do nó doador correspondente com a senha escolhida."""
+        raw_path = self.file_path_var.get().strip()
+        pwd = self.operator_password_var.get().strip()
+        if not pwd:
+            messagebox.showwarning("Aviso", "Defina uma senha do operador para trancar o cofre.")
+            return
+
+        ContextGuard.get_or_set_operator_password(password=pwd, repo_root=self.repo_root)
+
+        content_to_lock = ""
+        if hasattr(self, "sanitizer_output_box"):
+            content_to_lock = self.sanitizer_output_box.get("1.0", "end").strip()
+        if not content_to_lock and raw_path and Path(raw_path).exists():
+            content_to_lock = Path(raw_path).read_text(encoding="utf-8", errors="ignore")
+
+        if not content_to_lock:
+            messagebox.showwarning("Aviso", "Nenhum dado ou arquivo selecionado para trancar no cofre.")
+            return
+
+        def _run() -> None:
+            try:
+                self.log("Trancando dados sensíveis com a senha do operador...")
+                vault = ContextGuard.pack_sensitive_donor_extraction(
+                    node_name="MASTER_NODE",
+                    raw_data=content_to_lock,
+                    password=pwd,
+                    repo_root=self.repo_root,
+                    db_manager=self.db,
+                )
+                self.log(f"Cofre trancado com sucesso para o Drive! Salvo em: {vault['relative_spool_path']}")
+                messagebox.showinfo(
+                    "Cofre Trancado",
+                    f"Dados sensíveis protegidos com sua senha em:\n{vault['relative_spool_path']}\nPronto para sincronização com o Drive!"
+                )
+            except Exception as exc:
+                self.log(f"Erro ao trancar dados no cofre: {exc}")
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def _on_generate_sanitized_derivative(self) -> None:
         """Gera cópia derivada higienizada calculando hashes SHA-256 e redação."""
         raw_path = self.file_path_var.get().strip()
@@ -2490,6 +2593,102 @@ class PCIMasterGUI:
         self.refresh_donors_table()
         self.refresh_matrix_table()
         self.root.mainloop()
+
+
+    # =========================================================================
+    # ABA 5: AIDER CLI & SUB-EXECUTOR SUPERVISIONADO
+    # =========================================================================
+    def _build_tab_aider(self, parent: ctk.CTkFrame) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(2, weight=1)
+
+        header_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(12, 6))
+        header_frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            header_frame,
+            text="⚡ Aider Sub-Executor Supervisionado // Modo Architect & Decomposição Cirúrgica",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#00f5d4",
+        ).grid(row=0, column=0, sticky="w")
+
+        info_lbl = ctk.CTkLabel(
+            parent,
+            text="O Aider opera subordinado ao Sovereign Code Engine com as travas de segurança ativas:\n"
+                 "• --no-auto-commits & --no-dirty-commits (O Aider NÃO commita no Git sem seu clique de aprovação).\n"
+                 "• --map-tokens 0 (Contenção estrita de contexto para não cegar o modelo 3B nem estourar a VRAM de 4GB).\n"
+                 "• Modo /architect (Gera apenas a decomposição incremental em microtarefas sem alterar arquivos).",
+            font=ctk.CTkFont(size=11),
+            justify="left",
+            text_color="#94a3b8",
+        )
+        info_lbl.grid(row=1, column=0, sticky="w", padx=15, pady=(0, 8))
+
+        # Ações do Aider
+        action_box = ctk.CTkFrame(parent, fg_color="#0f1726", border_width=1, border_color="#1b2840")
+        action_box.grid(row=2, column=0, sticky="nsew", padx=15, pady=6)
+        action_box.grid_columnconfigure(0, weight=1)
+        action_box.grid_rowconfigure(2, weight=1)
+
+        top_ctrl = ctk.CTkFrame(action_box, fg_color="transparent")
+        top_ctrl.grid(row=0, column=0, sticky="ew", padx=12, pady=10)
+
+        ctk.CTkLabel(top_ctrl, text="Instrução para o Aider:", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00bbf9").pack(side="left", padx=(0, 10))
+
+        self.aider_prompt_entry = ctk.CTkEntry(
+            top_ctrl,
+            placeholder_text="Ex: /architect Decomponha a função de validação de lotes em passos de 20 linhas",
+            width=500,
+            fg_color="#070a10",
+        )
+        self.aider_prompt_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+        btn_run_arch = ctk.CTkButton(
+            top_ctrl,
+            text="▶ Executar /architect",
+            command=self._on_run_aider_architect_clicked,
+            fg_color="#00f5d4",
+            text_color="#070a10",
+            hover_color="#00bbf9",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            width=160,
+        )
+        btn_run_arch.pack(side="right")
+
+        self.aider_output_box = ctk.CTkTextbox(
+            action_box,
+            fg_color="#070a10",
+            border_width=1,
+            border_color="#1b2840",
+            text_color="#e2e8f0",
+            font=ctk.CTkFont(family="Consolas", size=11),
+        )
+        self.aider_output_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        action_box.grid_rowconfigure(1, weight=1)
+        self.aider_output_box.insert("1.0", "Console do Aider pronto. Digite uma instrução acima e clique em 'Executar /architect'.\n")
+
+    def _on_run_aider_architect_clicked(self) -> None:
+        prompt = self.aider_prompt_entry.get().strip()
+        if not prompt:
+            prompt = "/architect Analise o projeto atual e decomponha a próxima funcionalidade em microtarefas testáveis."
+
+        self.log(f"Disparando Aider em modo /architect: {prompt[:60]}...")
+        self.aider_output_box.delete("1.0", "end")
+        self.aider_output_box.insert("1.0", f"[AIDER RUNNING] Executando /architect com travas de segurança ativas...\nComando: {prompt}\n\n")
+
+        def _worker():
+            res = self.aider_runner.run_architect_planning(files=[], prompt=prompt)
+            out = res.get("output") or res.get("error", "Sem saída registrada.")
+            def _ui():
+                self.aider_output_box.delete("1.0", "end")
+                self.aider_output_box.insert("1.0", out)
+                self.log("Aider concluiu o planejamento com sucesso.")
+            self.dispatch_to_ui(_ui)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
 
 
 # Alias de conveniência

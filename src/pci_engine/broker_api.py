@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Set
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
+from pci_engine.context_guard import ContextGuard
 from pci_engine.database import DatabaseManager
 from pci_engine.orchestrator import TaskExecutionOrchestrator
 from pci_engine.preflight import PreflightChecker
@@ -131,6 +132,17 @@ class SubmitTaskRequest(BaseModel):
     node_id: str
     candidate_code: str
     compute_seconds: float = Field(ge=0.0)
+    extracted_sensitive_data: Optional[str] = None
+    encryption_password: Optional[str] = None
+
+
+class InvestigativeSubmissionRequest(BaseModel):
+    node_id: str
+    task_id: Optional[str] = None
+    extracted_content: str
+    password: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    compute_seconds: float = Field(default=1.0, ge=0.0)
 
 
 class SubmissionRequest(BaseModel):
@@ -267,12 +279,28 @@ def submit_task_v1(req: SubmitTaskRequest, token: str = Depends(verify_donor_tok
 
     if success:
         kudos = round((task["estimated_lines"] * 0.5) + (req.compute_seconds * 0.05), 2)
-        return {
+        resp_data: Dict[str, Any] = {
             "status": "VERIFIED_AND_INTEGRATED",
             "task_id": req.task_id,
             "awarded": True,
             "kudos": kudos,
         }
+
+        # Se houver dados sensíveis extraídos pelo nó doador, tranca com a senha do operador
+        if req.extracted_sensitive_data:
+            node = db.get_node(req.node_id)
+            node_name = node["node_name"] if node else req.node_id
+            vault_info = ContextGuard.pack_sensitive_donor_extraction(
+                node_name=node_name,
+                raw_data=req.extracted_sensitive_data,
+                password=req.encryption_password,
+                repo_root=REPO_ROOT,
+                db_manager=db,
+                task_id=req.task_id,
+            )
+            resp_data["sensitive_vault"] = vault_info
+
+        return resp_data
     else:
         return {
             "status": "TEST_FAILED_RETRYING",
@@ -280,6 +308,60 @@ def submit_task_v1(req: SubmitTaskRequest, token: str = Depends(verify_donor_tok
             "awarded": False,
             "detail": "Código reprovado no Pytest isolado do Master PC.",
         }
+
+
+@app.post("/api/v1/investigative/submit")
+def submit_investigative_extraction_v1(
+    req: InvestigativeSubmissionRequest,
+    token: str = Depends(verify_donor_token),
+):
+    """
+    Recebe diretamente dados sensíveis extraídos por nó doador (ou worker Tailscale).
+    Os dados (CPFs, e-mails, contratos) NÃO sofrem redação: são 100% preservados,
+    mas são imediatamente trancados em data/spool_encrypted/<nome_doador>/
+    com a senha criptográfica definida pelo operador antes da sincronização com o Drive.
+    """
+    db = get_db()
+    node = db.get_node(req.node_id)
+    node_name = node["node_name"] if node else req.node_id
+
+    vault_info = ContextGuard.pack_sensitive_donor_extraction(
+        node_name=node_name,
+        raw_data=req.extracted_content,
+        password=req.password,
+        repo_root=REPO_ROOT,
+        db_manager=db,
+        task_id=req.task_id,
+    )
+
+    # Recompensa de kudos ao nó doador pelo processamento investigativo
+    kudos = round(max(1.0, (len(req.extracted_content) / 200.0) + (req.compute_seconds * 0.1)), 2)
+    if node:
+        kudos_task_id = req.task_id if (req.task_id and db.get_task(req.task_id)) else None
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE nodes SET kudos_balance = kudos_balance + ? WHERE node_id = ?",
+                (kudos, req.node_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO kudos_ledger (node_id, task_id, kudos_awarded, compute_seconds)
+                VALUES (?, ?, ?, ?)
+                """,
+                (req.node_id, kudos_task_id, kudos, req.compute_seconds),
+            )
+            conn.commit()
+
+    return {
+        "status": "INVESTIGATIVE_EXTRACTION_LOCKED",
+        "node_id": req.node_id,
+        "node_name": node_name,
+        "evidence_id": vault_info["evidence_id"],
+        "spool_file": vault_info["spool_file"],
+        "relative_spool_path": vault_info["relative_spool_path"],
+        "kudos_awarded": kudos,
+        "message": f"Dados trancados com sucesso na pasta do doador '{node_name}' para o Drive.",
+    }
 
 
 @app.get("/api/v1/kudos/{node_id}")
