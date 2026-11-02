@@ -308,6 +308,14 @@ class DatabaseManager:
             row = conn.execute("SELECT * FROM tasks_queue WHERE task_id = ?", (task_id,)).fetchone()
             return dict(row) if row else None
 
+    def list_tasks(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            if status:
+                rows = conn.execute("SELECT * FROM tasks_queue WHERE status = ? ORDER BY created_at ASC", (status,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM tasks_queue ORDER BY created_at ASC").fetchall()
+            return [dict(r) for r in rows]
+
     def update_task_status(
         self,
         task_id: str,
