@@ -749,14 +749,55 @@ class PCIMasterGUI:
     # =========================================================================
 
     def _on_clean_ram_clicked(self) -> None:
-        """Executa limpeza de RAM e caches em background."""
+        """
+        Executa higiene de RAM em 2 etapas:
+        1. Limpa caches e encerra processos secundários ociosos automaticamente (sem pedir permissão).
+        2. Detecta processos pesados de desenvolvimento (ex: Antigravity, Language Server) e solicita
+           permissão explícita ao operador informando o ganho de memória antes de finalizar.
+        """
         def _run():
-            self.log("Iniciando rotina de higiene de memória RAM e limpeza de caches temporários...")
-            hygiene = RAMLiberator.execute_hygiene_pipeline(auto_terminate=False, repo_root=self.repo_root)
+            self.log("=========================================================================")
+            self.log("Iniciando rotina de higiene de memória RAM e varredura de processos...")
+
+            # Etapa 1: Limpeza automática de caches e processos secundários de background
+            hygiene = RAMLiberator.execute_hygiene_pipeline(auto_terminate=True, repo_root=self.repo_root)
             self.log(
-                f"Higiene concluída com sucesso! Total liberado: {hygiene['total_freed_mb']} MB "
-                f"(RAM livre agora: {hygiene['ram_after_mb']} MB)."
+                f"[Etapa 1/2] Limpeza automática concluída: {hygiene['total_freed_mb']} MB liberados "
+                f"({hygiene['terminated_processes_count']} processo(s) encerrado(s))."
             )
+
+            # Etapa 2: Varre processos pesados (Antigravity / IDEs)
+            heavy_candidates, heavy_mb = RAMLiberator.scan_heavy_interactive_processes()
+            if heavy_candidates and heavy_mb > 50.0:
+                details = "\n".join(f"• {c.name} ({c.description}): {c.total_rss_mb:.1f} MB [{c.count} instância(s)]" for c in heavy_candidates)
+                prompt_msg = (
+                    f"Processos pesados detectados ocupando {heavy_mb:.1f} MB de RAM:\n\n"
+                    f"{details}\n\n"
+                    f"Deseja finalizar esses processos agora para liberar a memória máxima para o modelo de IA?"
+                )
+
+                def _ask_and_terminate():
+                    answer = messagebox.askyesno(
+                        "PCI RAM Liberator — Confirmação de Encerramento",
+                        prompt_msg,
+                    )
+                    if answer:
+                        def _terminate_heavy():
+                            self.log(f"Encerrando processos pesados autorizados pelo operador ({heavy_mb:.1f} MB)...")
+                            freed, pids = RAMLiberator.terminate_candidates(heavy_candidates)
+                            ram_now = RAMLiberator.get_system_ram_mb()
+                            self.log(
+                                f"[Etapa 2/2] Sucesso! {freed:.1f} MB adicionais liberados "
+                                f"({len(pids)} processos finalizados). RAM livre agora: {ram_now['available_mb']} MB."
+                            )
+                        threading.Thread(target=_terminate_heavy, daemon=True).start()
+                    else:
+                        self.log("Operador optou por manter o Antigravity / IDE aberto. RAM preservada.")
+
+                self.dispatch_to_ui(_ask_and_terminate)
+            else:
+                ram_now = RAMLiberator.get_system_ram_mb()
+                self.log(f"Higiene concluída! RAM livre disponível: {ram_now['available_mb']} MB.")
 
         threading.Thread(target=_run, daemon=True).start()
 

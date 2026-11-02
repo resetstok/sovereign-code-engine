@@ -28,6 +28,36 @@ DEFAULT_TARGET_PROCESSES = {
     "telegram.exe": "Telegram Desktop",
     "whatsapp.exe": "WhatsApp Desktop",
     "spotify.exe": "Spotify",
+    "notepad.exe": "Bloco de Notas",
+    "snippingtool.exe": "Ferramenta de Captura",
+    "phoneexperiencehost.exe": "Vincular ao Celular",
+    "adobecollabsync.exe": "Adobe Creative Cloud Sync",
+    "widgets.exe": "Widgets do Windows",
+    "teams.exe": "Microsoft Teams",
+}
+
+# Processos pesados de desenvolvimento que consomem gigabytes de RAM
+HEAVY_DEV_PROCESSES = {
+    "antigravity.exe": "Google Antigravity IDE (Ambiente Principal de IA)",
+    "language_server.exe": "Language Server / Análise de Código",
+    "code.exe": "Visual Studio Code",
+}
+
+# Processos do sistema operacional e do próprio PCI Engine que NUNCA devem ser fechados
+PROTECTED_PROCESSES = {
+    "explorer.exe",
+    "dwm.exe",
+    "csrss.exe",
+    "lsass.exe",
+    "services.exe",
+    "smss.exe",
+    "wininit.exe",
+    "winlogon.exe",
+    "svchost.exe",
+    "msmpeng.exe",
+    "ollama.exe",
+    "python.exe",
+    "pythonw.exe",
 }
 
 
@@ -54,6 +84,14 @@ class RAMLiberator:
             "used_mb": round(vm.used / (1024 * 1024), 2),
             "percent_used": vm.percent,
         }
+
+    @classmethod
+    def scan_heavy_interactive_processes(cls) -> Tuple[List[ProcessGroupSummary], float]:
+        """
+        Escaneia processos pesados que consomem gigabytes de memória (ex: IDEs, Antigravity)
+        e que exigem permissão explícita do usuário antes de serem encerrados.
+        """
+        return cls.scan_releasable_processes(target_process_map=HEAVY_DEV_PROCESSES)
 
     @classmethod
     def scan_releasable_processes(
