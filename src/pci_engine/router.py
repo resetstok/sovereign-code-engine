@@ -1,6 +1,8 @@
 """
 Módulo: pci_engine/router.py
-Roteador Cognitivo, Broker com Pull & Lease e Validação Isolada via Git Worktree (Entregável 2 / v2.1).
+Roteador Cognitivo e Broker de Tarefas (PCIRouter) da Arquitetura PCI Master System v2.0.
+Implementa a árvore de decisão determinística, recuperação de Leases expirados
+e validação em sandbox isolado com Git Worktree (nanocoder pattern).
 """
 
 from __future__ import annotations
@@ -15,38 +17,35 @@ from typing import Any, Dict, Optional, Tuple
 
 import psutil
 
-from pci_engine.db import JobsDatabaseV2
+from pci_engine.database import DatabaseManager
 from pci_engine.preflight import PreflightChecker
 
 logger = logging.getLogger("pci_engine.router")
 
 
-class PCIRouterAndBroker:
+class PCIRouter:
     """
-    Roteador Cognitivo e Broker de Tarefas da arquitetura v2.1.
-    Coordena decisões de envio (Local 3B, Cloud API, Fila Noturna e Doador),
-    mecanismo de Pull com Lease e verificação em sandbox via Git Worktree (nanocoder pattern).
+    Roteador Cognitivo e Gestor de Leases do PCI Engine.
+    Decide o roteamento determinístico entre Ollama Local 3B, APIs Gratuitas,
+    Fila Noturna Colibrì e Pool de Doadores via Tailscale.
     """
 
     def __init__(self, db_path: Path | str = "data/jobs.db", repo_root: Path | str = "."):
         self.db_path = Path(db_path).resolve()
         self.repo_root = Path(repo_root).resolve()
-        self.db = JobsDatabaseV2(db_path=self.db_path)
+        self.db = DatabaseManager(db_path=self.db_path)
 
     def _get_conn(self) -> sqlite3.Connection:
         return self.db.get_connection()
 
-    # 1. PREFLIGHT E CONTENÇÃO DE HARDWARE
-    def check_master_health(self) -> Dict[str, Any]:
-        health = PreflightChecker.check_health(self.db_path.parent)
-        if health["ssd_critical"]:
-            raise SystemError(
-                f"BLOCKED_EXTERNAL: Espaço em SSD crítico ({health['ssd_free_gb']:.1f}GB < 40GB). Abortando fila."
-            )
-        return health
-
-    # 2. RECUPERAÇÃO DE ÓRFÃOS (Pull with Lease Expiration)
+    # -------------------------------------------------------------------------
+    # 1. Recuperação de Leases Expirados (Reclaim Expired Leases)
+    # -------------------------------------------------------------------------
     def reclaim_expired_leases(self) -> int:
+        """
+        Devolve tarefas travadas em nós doadores com lease vencido para PENDING
+        (ou BLOCKED_HUMAN_REVIEW se atingir max_attempts), incrementando attempt_count.
+        """
         with self._get_conn() as conn:
             now = datetime.now(timezone.utc).isoformat()
             cursor = conn.cursor()
@@ -71,47 +70,66 @@ class PCIRouterAndBroker:
                 logger.warning(f"Leases expirados recuperados: {reclaimed}")
             return reclaimed
 
-    # 3. ÁRVORE DE DECISÃO DE ROTEAMENTO
-    def route_task(self, task: sqlite3.Row, api_quotas: Dict[str, Any], online_mode: bool) -> str:
+    # -------------------------------------------------------------------------
+    # 2. Árvore de Decisão Determinística de Roteamento
+    # -------------------------------------------------------------------------
+    def route_task(
+        self,
+        task: sqlite3.Row | Dict[str, Any],
+        api_quotas: Dict[str, Any],
+        online_mode: bool = False,
+    ) -> str:
+        """
+        Árvore de decisão determinística de roteamento:
+        1. Se attempt_count >= max_attempts -> BLOCKED_HUMAN_REVIEW
+        2. Se privacy_level == 'STRICT_LOCAL' -> nunca sai do Master PC (LOCAL_3B se <= 35 linhas, senão NIGHTLY_14B)
+        3. Se estimated_lines <= 30 e taxa na capability_matrix >= 0.86 -> LOCAL_3B
+        4. Se task_type == 'REFACTOR' ou > 120 linhas -> NIGHTLY_14B
+        5. Se Modo Online ativo e cota em APIs gratuitas (Groq, Cerebras, OpenRouter) e tarefa permite -> CLOUD_API:<provider>
+        6. Se APIs esgotadas ou Modo Offline, mas houver Doador ONLINE qualificado (>= 0.86) -> DONOR_POOL
+        7. Fallback seguro (sem envio invisível para nuvem) -> NIGHTLY_14B
+        """
         privacy = task["privacy_level"]
         lines = task["estimated_lines"]
         task_type = task["task_type"]
         attempts = task["attempt_count"]
+        max_attempts = task.get("max_attempts", 3) if isinstance(task, dict) else task["max_attempts"]
 
-        # Regra Zero: Limite de falhas atingido vai direto para revisão humana
-        if attempts >= task["max_attempts"]:
+        # Ramo 1: Limite de falhas atingido exige revisão humana
+        if attempts >= max_attempts:
             return "BLOCKED_HUMAN_REVIEW"
 
-        # Regra 1: Dados estritamente locais NUNCA saem do Master PC
+        # Ramo 2: Dados estritamente locais NUNCA saem do Master PC (nem nuvem, nem doadores)
         if privacy == "STRICT_LOCAL":
             if lines <= 35 and attempts == 0:
                 return "LOCAL_3B"
             return "NIGHTLY_14B"
 
-        # Regra 2: Tarefas curtas e diretas (Micro-escopo) -> Ollama Local 3B
-        if lines <= 30 and task_type in ("EXTRACTION", "CRUD") and attempts == 0:
-            if self._is_model_qualified("MASTER_NODE", "qwen2.5-coder:3b", task_type, min_rate=0.86):
-                return "LOCAL_3B"
-
-        # Regra 3: Refatoração estrutural pesada sem urgência imediata -> Fila Noturna Colibrì
+        # Ramo 3: Refatoração pesada ou mais de 120 linhas -> Fila Noturna Colibrì (3B não faz refactor)
         if task_type == "REFACTOR" or lines > 120:
             return "NIGHTLY_14B"
 
-        # Regra 4: Modo Online ativo + Tarefa complexa ou falha prévia -> API Gratuita
+        # Ramo 4: Microtarefa leve (<= 30 linhas) com histórico satisfatório (>= 86%) -> Local 3B
+        if lines <= 30 and attempts == 0:
+            if self._is_model_qualified("MASTER_NODE", "qwen2.5-coder:3b", task_type, min_rate=0.86):
+                return "LOCAL_3B"
+
+        # Ramo 5: Modo Online ativo + tarefa pública/higienizada -> APIs Gratuitas
         if online_mode and privacy in ("PUBLIC", "SANITIZED_DERIVATIVE"):
             for provider in ("groq", "cerebras", "openrouter"):
-                remaining = api_quotas.get(provider, {}).get("remaining_requests", 0)
+                quota = api_quotas.get(provider, {})
+                remaining = quota.get("remaining_requests", 0)
                 if remaining > 5:
                     return f"CLOUD_API:{provider}"
 
-        # Regra 5: APIs esgotadas (ou modo Offline) -> Verifica Pool de Doadores
+        # Ramo 6: APIs esgotadas ou Modo Offline -> Pool de Doadores qualificados via Tailscale
         if self._has_eligible_donor(task_type, min_rate=0.86):
             return "DONOR_POOL"
 
-        # Fallback Seguro: agenda para a madrugada no disco via mmap
+        # Ramo 7: Fallback Seguro (sem vazamento de dados) -> Fila Noturna Colibrì
         return "NIGHTLY_14B"
 
-    def _is_model_qualified(self, node_id: str, model: str, task_type: str, min_rate: float) -> bool:
+    def _is_model_qualified(self, node_id: str, model: str, task_type: str, min_rate: float = 0.86) -> bool:
         with self._get_conn() as conn:
             row = conn.execute(
                 """
@@ -121,10 +139,10 @@ class PCIRouterAndBroker:
                 (node_id, model, task_type),
             ).fetchone()
             if not row:
-                return True
+                return True  # Calibração inicial permite execução
             return row["success_rate"] >= min_rate
 
-    def _has_eligible_donor(self, task_type: str, min_rate: float) -> bool:
+    def _has_eligible_donor(self, task_type: str, min_rate: float = 0.86) -> bool:
         with self._get_conn() as conn:
             row = conn.execute(
                 """
@@ -138,7 +156,9 @@ class PCIRouterAndBroker:
             ).fetchone()
             return row is not None
 
-    # 4. PULL COM LEASE (Chamado pelo PC Doador via FastAPI/Tailscale)
+    # -------------------------------------------------------------------------
+    # 3. Pull com Lease para Doadores
+    # -------------------------------------------------------------------------
     def lease_task_for_donor(self, donor_node_id: str, lease_minutes: int = 45) -> Optional[Dict[str, Any]]:
         self.reclaim_expired_leases()
         with self._get_conn() as conn:
@@ -178,14 +198,12 @@ class PCIRouterAndBroker:
                 "lease_expires_at": expires,
             }
 
-    # 5. VALIDAÇÃO ISOLADA NO MASTER (Git Worktree + Pytest Sandbox)
+    # -------------------------------------------------------------------------
+    # 4. Sandbox e Validação de Submissões (Git Worktree)
+    # -------------------------------------------------------------------------
     def verify_and_integrate_submission(
         self, task_id: str, node_id: str, candidate_code: str, compute_sec: float
     ) -> bool:
-        """
-        O código vindo do Doador ou da IA nunca vai direto para a branch de trabalho.
-        É testado em sandbox isolado via Git Worktree (nanocoder pattern) com timeout estrito.
-        """
         with self._get_conn() as conn:
             task = conn.execute("SELECT * FROM tasks_queue WHERE task_id = ?", (task_id,)).fetchone()
             if not task or task["status"] not in ("LEASED", "PENDING", "VALIDATING"):
@@ -243,16 +261,13 @@ class PCIRouterAndBroker:
     def _run_in_worktree_or_fallback(
         self, task_id: str, target_file_path: str, candidate_code: str, test_code: str
     ) -> Tuple[bool, str, str]:
-        """Tenta executar via Git Worktree destacada (nanocoder). Em falha, recorre a tempfile."""
         worktree_dir = (self.repo_root / "data" / "sandboxes" / f"sandbox_{task_id}").resolve()
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
 
-        # 1. Cria git worktree destacada
         cmd_add = ["git", "worktree", "add", "--detach", str(worktree_dir), "HEAD"]
         res_add = subprocess.run(cmd_add, cwd=str(self.repo_root), capture_output=True, text=True)
 
         if res_add.returncode != 0:
-            # Fallback transparente para TemporaryDirectory
             return self._run_in_tempdir_fallback(target_file_path, candidate_code, test_code)
 
         try:
@@ -302,3 +317,7 @@ class PCIRouterAndBroker:
                 return (res.returncode == 0), res.stdout, res.stderr
             except subprocess.TimeoutExpired:
                 return False, "", "Timeout de 30s excedido em sandbox temporário."
+
+
+# Alias de compatibilidade retroativa
+PCIRouterAndBroker = PCIRouter
