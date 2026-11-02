@@ -1,11 +1,13 @@
 """
-Testes Unitários para o Processador Noturno Colibrì (Etapa 7).
+Testes Unitários para o Processador Noturno Colibrì (Etapa 6/7).
 Valida a montagem do comando llama-server com contenção de RAM (--mmap 1),
-busca de tarefas na fila, extração de código e execução em lote.
+varredura de comentários # REFACTOR_NIGHTLY, checagem de usuário ativo,
+higiene preventiva de RAM, execução em lote e commit na branch nightly/colibri-batch.
 """
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
@@ -73,12 +75,65 @@ def test_extract_code_variants():
 
 
 # =============================================================================
-# 2. FILTRAGEM DE TAREFAS NOTURNAS E EXECUÇÃO EM LOTE
+# 2. VARREDURA DE COMENTÁRIOS # REFACTOR_NIGHTLY
+# =============================================================================
+
+def test_scan_refactor_comments(worker: NightlyColibriWorker, tmp_path: Path):
+    """Testa a descoberta de comentários # REFACTOR_NIGHTLY no projeto e inserção na fila."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True, exist_ok=True)
+
+    module_code = (
+        "def calcular_imposto(valor):\n"
+        "    # REFACTOR_NIGHTLY: Otimizar calculo de aliquotas usando dicionario estatico\n"
+        "    return valor * 0.15\n"
+    )
+    (src_dir / "fiscal.py").write_text(module_code, encoding="utf-8")
+
+    # Executa varredura
+    scanned = worker.scan_refactor_comments()
+    assert len(scanned) == 1
+    assert scanned[0]["instruction"] == "Otimizar calculo de aliquotas usando dicionario estatico"
+    assert scanned[0]["line"] == 2
+
+    # Verifica se a tarefa foi criada no jobs.db com a rota correta
+    tasks = worker.fetch_nightly_tasks()
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t["task_type"] == "REFACTOR"
+    assert t["assigned_route"] == "NIGHTLY_14B"
+    assert t["status"] == "NIGHTLY_BATCH"
+
+    # Segunda varredura não deve duplicar tarefas existentes
+    scanned_again = worker.scan_refactor_comments()
+    assert len(scanned_again) == 0
+
+
+# =============================================================================
+# 3. DETECÇÃO DE ATIVIDADE DO USUÁRIO E HIGIENE DE RAM
+# =============================================================================
+
+def test_user_activity_detection():
+    """Testa o detector de atividade do usuário."""
+    # Como função pura, deve retornar booleano sem levantar exceção
+    active = NightlyColibriWorker.is_user_active(idle_threshold_sec=3600)
+    assert isinstance(active, bool)
+
+
+def test_preflight_hygiene(worker: NightlyColibriWorker):
+    """Verifica que a rotina preventiva de limpeza de RAM e caches executa com sucesso."""
+    hygiene = worker.run_preflight_hygiene()
+    assert "ram_after_mb" in hygiene
+    assert "total_freed_mb" in hygiene
+    assert hygiene["ram_after_mb"] > 0
+
+
+# =============================================================================
+# 4. FILTRAGEM DE TAREFAS NOTURNAS E EXECUÇÃO EM LOTE
 # =============================================================================
 
 def test_fetch_nightly_tasks(clean_db: DatabaseManager, worker: NightlyColibriWorker):
     """Verifica que apenas tarefas destinadas à madrugada são selecionadas."""
-    # 1. Tarefa com rota NIGHTLY_14B
     clean_db.insert_task(
         task_id="TASK_NIGHT_01",
         parent_masterbook="MB_NIGHT",
@@ -92,7 +147,6 @@ def test_fetch_nightly_tasks(clean_db: DatabaseManager, worker: NightlyColibriWo
     )
     clean_db.update_task_status("TASK_NIGHT_01", status="PENDING", assigned_route="NIGHTLY_14B")
 
-    # 2. Tarefa normal LOCAL_3B (não deve vir no fetch)
     clean_db.insert_task(
         task_id="TASK_DAY_01",
         parent_masterbook="MB_NIGHT",
@@ -106,7 +160,6 @@ def test_fetch_nightly_tasks(clean_db: DatabaseManager, worker: NightlyColibriWo
     )
     clean_db.update_task_status("TASK_DAY_01", status="PENDING", assigned_route="LOCAL_3B")
 
-    # 3. Tarefa já VERIFIED (não deve vir no fetch)
     clean_db.insert_task(
         task_id="TASK_DONE_01",
         parent_masterbook="MB_NIGHT",
@@ -141,7 +194,6 @@ def test_execute_batch_success(clean_db: DatabaseManager, worker: NightlyColibri
         status="NIGHTLY_BATCH",
     )
 
-    # Mock do inference engine e da validação no sandbox
     monkeypatch.setattr(
         worker,
         "_call_inference_engine",
@@ -152,10 +204,30 @@ def test_execute_batch_success(clean_db: DatabaseManager, worker: NightlyColibri
         "verify_and_integrate_submission",
         lambda task_id, node_id, candidate_code, compute_sec: True,
     )
+    monkeypatch.setattr(worker, "commit_to_nightly_branch", lambda *args, **kwargs: True)
 
     success_count = worker.execute_batch(max_tasks=5)
     assert success_count == 1
 
-    # Tarefa deve ter sido completada
     tasks_remaining = worker.fetch_nightly_tasks()
     assert len(tasks_remaining) == 0
+
+
+def test_run_nightly_pipeline_user_active_abort(worker: NightlyColibriWorker, monkeypatch):
+    """Verifica que se o usuário estiver ativo no PC, o pipeline noturno é abortado imediatamente."""
+    monkeypatch.setattr(worker, "is_user_active", lambda idle_threshold_sec: True)
+    res = worker.run_nightly_pipeline(check_user=True)
+    assert res["status"] == "ABORTED_USER_ACTIVE"
+    assert res["success_count"] == 0
+
+
+def test_run_nightly_pipeline_complete(worker: NightlyColibriWorker, clean_db: DatabaseManager, monkeypatch):
+    """Testa o ciclo completo orquestrado do pipeline noturno."""
+    monkeypatch.setattr(worker, "is_user_active", lambda idle_threshold_sec: False)
+    monkeypatch.setattr(worker, "start_llama_server", lambda **kw: False)
+    monkeypatch.setattr(worker, "execute_batch", lambda max_tasks: 2)
+
+    res = worker.run_nightly_pipeline(check_user=True)
+    assert res["status"] == "COMPLETED"
+    assert res["success_count"] == 2
+    assert "hygiene" in res
