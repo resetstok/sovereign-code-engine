@@ -1131,6 +1131,10 @@ class PCIMasterGUI:
         self.root.mainloop()
 
 
+# Alias de conveniência
+PCIMasterApp = PCIMasterGUI
+
+
 def main():
     app = PCIMasterGUI()
     app.run()
