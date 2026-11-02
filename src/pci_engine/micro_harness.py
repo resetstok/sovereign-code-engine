@@ -59,11 +59,17 @@ class MicroHarness:
         self,
         repo_root: Path | str,
         db_manager: Optional[DatabaseManager] = None,
+        db_path: Optional[Path | str] = None,
         ollama_url: str = "http://127.0.0.1:11434",
         model: str = "qwen2.5-coder:3b",
     ):
         self.repo_root = Path(repo_root).resolve()
-        self.db = db_manager
+        if db_manager:
+            self.db = db_manager
+        elif db_path:
+            self.db = DatabaseManager(db_path=db_path)
+        else:
+            self.db = None
         self.ollama_url = ollama_url
         self.model = model
         self.read_files_session: Set[str] = set()

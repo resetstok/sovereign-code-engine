@@ -130,6 +130,49 @@ class PCIRouter:
         # Ramo 7: Fallback Seguro (sem vazamento de dados) -> Fila Noturna Colibrì
         return "NIGHTLY_14B"
 
+    def route_all_pending_tasks(
+        self,
+        api_quotas: Optional[Dict[str, Any]] = None,
+        online_mode: bool = False,
+    ) -> int:
+        """
+        Varre todas as tarefas com status 'PENDING' que ainda não possuem 'assigned_route'
+        (ou com rota desatualizada) e aplica a árvore de decisão determinística.
+        Salva a rota atribuída no banco de dados e retorna o total de tarefas roteadas.
+        """
+        if api_quotas is None:
+            api_quotas = {}
+            config_path = self.repo_root / "config" / "routing_policy.json"
+            if config_path.is_file():
+                try:
+                    import json
+                    policy = json.loads(config_path.read_text(encoding="utf-8"))
+                    api_quotas = policy.get("cloud_api_quotas", {})
+                except Exception:
+                    pass
+
+        routed_count = 0
+        with self._get_conn() as conn:
+            tasks = conn.execute(
+                """
+                SELECT * FROM tasks_queue
+                WHERE status = 'PENDING' AND (assigned_route IS NULL OR assigned_route = '')
+                ORDER BY created_at ASC
+                """
+            ).fetchall()
+
+            for task_row in tasks:
+                task_dict = dict(task_row)
+                chosen_route = self.route_task(task_dict, api_quotas=api_quotas, online_mode=online_mode)
+                conn.execute(
+                    "UPDATE tasks_queue SET assigned_route = ? WHERE task_id = ?",
+                    (chosen_route, task_dict["task_id"]),
+                )
+                routed_count += 1
+            conn.commit()
+
+        return routed_count
+
     def _is_model_qualified(self, node_id: str, model: str, task_type: str, min_rate: float = 0.86) -> bool:
         with self._get_conn() as conn:
             row = conn.execute(

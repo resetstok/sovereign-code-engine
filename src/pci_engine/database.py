@@ -103,6 +103,20 @@ CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes(status);
 """
 
 
+class PromotedTasksList(list):
+    """
+    Lista de IDs de tarefas desbloqueadas.
+    Permite comparação tanto como lista (in / eq) quanto como contagem inteira (== int).
+    """
+    def __eq__(self, other):
+        if isinstance(other, int):
+            return len(self) == other
+        return super().__eq__(other)
+
+    def __int__(self):
+        return len(self)
+
+
 class DatabaseManager:
     """Gerenciador de banco de dados SQLite WAL do PCI Master System v2.0."""
 
@@ -352,26 +366,31 @@ class DatabaseManager:
             )
             conn.commit()
 
-    def unlock_ready_tasks(self) -> int:
+    def unlock_ready_tasks(self) -> PromotedTasksList:
         """
         Promove tarefas de 'WAITING_DEPS' para 'PENDING' cujas dependências
-        já estejam com status 'VERIFIED'.
+        já estejam com status 'VERIFIED'. Retorna PromotedTasksList com os task_ids.
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
+            rows = cursor.execute(
                 """
-                UPDATE tasks_queue
-                SET status = 'PENDING'
+                SELECT task_id FROM tasks_queue
                 WHERE status = 'WAITING_DEPS'
                   AND depends_on_task_id IN (
                       SELECT task_id FROM tasks_queue WHERE status = 'VERIFIED'
                   )
                 """
-            )
-            promoted = cursor.rowcount
-            conn.commit()
-            return promoted
+            ).fetchall()
+            unlocked_ids = [r["task_id"] for r in rows]
+            if unlocked_ids:
+                placeholders = ",".join("?" * len(unlocked_ids))
+                cursor.execute(
+                    f"UPDATE tasks_queue SET status = 'PENDING' WHERE task_id IN ({placeholders})",
+                    unlocked_ids,
+                )
+                conn.commit()
+            return PromotedTasksList(unlocked_ids)
 
     # -------------------------------------------------------------------------
     # CRUD: 4. LIVRO-RAZÃO DE KUDOS (Kudos Ledger)

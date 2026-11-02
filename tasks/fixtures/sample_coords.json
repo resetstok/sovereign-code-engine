@@ -1,0 +1,38 @@
+[
+  {
+    "id": "SAT_PT_01",
+    "label": "Estação Araruama Centro",
+    "latitude": -22.8731,
+    "longitude": -42.3431,
+    "altitude_m": 15.4,
+    "satellite": "Sentinel-2",
+    "cloud_cover_pct": 2.1
+  },
+  {
+    "id": "SAT_PT_02",
+    "label": "Hospital Regional IOR",
+    "latitude": -22.8640,
+    "longitude": -42.3290,
+    "altitude_m": 18.2,
+    "satellite": "Landsat-9",
+    "cloud_cover_pct": 0.5
+  },
+  {
+    "id": "SAT_PT_03",
+    "label": "Posto Saúde Iguabinha",
+    "latitude": -22.8550,
+    "longitude": -42.3780,
+    "altitude_m": 12.0,
+    "satellite": "Sentinel-2",
+    "cloud_cover_pct": 1.8
+  },
+  {
+    "id": "SAT_PT_INVALID",
+    "label": "Ponto Ruído Fora de Escopo",
+    "latitude": -95.0,
+    "longitude": -42.3000,
+    "altitude_m": 0.0,
+    "satellite": "Unknown",
+    "cloud_cover_pct": 100.0
+  }
+]
