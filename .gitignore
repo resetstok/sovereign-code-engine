@@ -28,6 +28,7 @@ pci_worker_workspace/
 .env
 .env.*
 config/routing_policy_private.json
+config/api_keys.json
 
 # Python padrão
 __pycache__/

@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PCI Sovereign Engine — Triquetra Tech Neon HUD & AI Step Tracker</title>
+  <style>
+    :root {
+      --bg-void: #070a10;
+      --bg-card: #0c121e;
+      --bg-step: #101827;
+      --border-dim: #1b2840;
+      --neon-cyan: #00f5d4;
+      --neon-blue: #00bbf9;
+      --neon-pink: #ff007f;
+      --neon-amber: #ffbe0b;
+      --text-main: #e2e8f0;
+      --text-muted: #64748b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-void);
+      background-image:
+        linear-gradient(rgba(0, 245, 212, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 245, 212, 0.03) 1px, transparent 1px);
+      background-size: 32px 32px;
+      color: var(--text-main);
+      font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .hud-wrapper {
+      width: 100%;
+      max-width: 920px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-dim);
+      border-radius: 16px;
+      box-shadow: 0 0 40px rgba(0, 245, 212, 0.08), inset 0 0 20px rgba(0, 187, 249, 0.03);
+      padding: 28px 32px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Linhas minimalistas neon de topo e base */
+    .hud-wrapper::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--neon-cyan), var(--neon-blue), transparent);
+      opacity: 0.85;
+    }
+
+    .hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-dim);
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+
+    .hud-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--neon-cyan);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .hud-badge {
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      color: var(--neon-blue);
+      border: 1px solid rgba(0, 187, 249, 0.35);
+      padding: 4px 10px;
+      border-radius: 99px;
+      background: rgba(0, 187, 249, 0.06);
+    }
+
+    .hud-grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 32px;
+      align-items: center;
+    }
+
+    /* =====================================================================
+       COMPONENTE 1: TRIQUETRA TECH NEON SPINNER + BARRA DE PROGRESSO (%)
+       ===================================================================== */
+    .triquetra-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(7, 10, 16, 0.65);
+      border: 1px solid var(--border-dim);
+      border-radius: 12px;
+      padding: 24px 20px;
+      position: relative;
+    }
+
+    .triquetra-svg-box {
+      width: 210px;
+      height: 210px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .triquetra-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      /* Rotação suave acelerada por GPU */
+      animation: triquetra-slow-spin 18s linear infinite;
+      will-change: transform;
+    }
+
+    @keyframes triquetra-slow-spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Trilho base escuro da Triquetra */
+    .triquetra-track {
+      fill: none;
+      stroke: #162238;
+      stroke-width: 4.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Feixe de luz Neon percorrendo a curva da Triquetra */
+    .triquetra-neon-beam {
+      fill: none;
+      stroke: url(#triquetraGradient);
+      stroke-width: 5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 180 420;
+      stroke-dashoffset: 600;
+      filter: drop-shadow(0 0 6px var(--neon-cyan)) drop-shadow(0 0 12px var(--neon-blue));
+      animation: triquetra-beam-flow 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+
+    /* Segundo feixe complementar em fase oposta */
+    .triquetra-neon-core {
+      fill: none;
+      stroke: var(--neon-pink);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-dasharray: 70 530;
+      stroke-dashoffset: 600;
+      opacity: 0.85;
+      filter: drop-shadow(0 0 8px var(--neon-pink));
+      animation: triquetra-beam-flow 2.8s linear infinite reverse;
+    }
+
+    @keyframes triquetra-beam-flow {
+      0% { stroke-dashoffset: 600; }
+      100% { stroke-dashoffset: 0; }
+    }
+
+    .triquetra-center-pct {
+      position: absolute;
+      font-family: 'Consolas', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-main);
+      text-shadow: 0 0 10px rgba(0, 245, 212, 0.55);
+      pointer-events: none;
+    }
+
+    /* Barra de Progresso Minimalista abaixo da Triquetra */
+    .progress-container {
+      width: 100%;
+      margin-top: 18px;
+    }
+
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      color: var(--neon-cyan);
+      margin-bottom: 6px;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 6px;
+      background: #131d31;
+      border-radius: 99px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--neon-blue), var(--neon-cyan), var(--neon-pink));
+      border-radius: 99px;
+      box-shadow: 0 0 10px var(--neon-cyan);
+      transition: width 0.35s ease;
+    }
+
+    /* =====================================================================
+       COMPONENTE 2: AI STEP TRACKER (LISTA DE TAREFAS DA IA EM TEMPO REAL)
+       ===================================================================== */
+    .steps-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .step-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 16px;
+      background: var(--bg-step);
+      border: 1px solid var(--border-dim);
+      border-radius: 10px;
+      transition: transform 0.25s ease, opacity 0.25s ease, border-color 0.25s ease;
+      will-change: transform, opacity;
+    }
+
+    .step-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .step-index {
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .step-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .step-status-badge {
+      font-family: 'Consolas', monospace;
+      font-size: 11px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Estado: PENDING (Aguardando) */
+    .step-item.pending {
+      opacity: 0.45;
+      transform: translateX(0);
+    }
+    .step-item.pending .step-status-badge {
+      color: var(--text-muted);
+      background: rgba(100, 116, 139, 0.12);
+    }
+
+    /* Estado: ACTIVE (Em Execução — Destaque Neon + Mini Spinner) */
+    .step-item.active {
+      opacity: 1;
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 16px rgba(0, 245, 212, 0.14);
+      transform: translateX(6px);
+    }
+    .step-item.active .step-index,
+    .step-item.active .step-title {
+      color: var(--neon-cyan);
+    }
+    .step-item.active .step-status-badge {
+      color: var(--neon-cyan);
+      background: rgba(0, 245, 212, 0.12);
+      border: 1px solid rgba(0, 245, 212, 0.35);
+    }
+
+    /* Mini-spinner leve em CSS puro (transform: rotate) */
+    .mini-spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(0, 245, 212, 0.25);
+      border-top-color: var(--neon-cyan);
+      border-radius: 50%;
+      display: none;
+      animation: spin-fast 0.75s linear infinite;
+    }
+    .step-item.active .mini-spinner {
+      display: inline-block;
+    }
+
+    @keyframes spin-fast {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Estado: COMPLETED (Concluído — Opaco com Check Verde Neon) */
+    .step-item.completed {
+      opacity: 0.58;
+      border-color: rgba(0, 245, 212, 0.25);
+      transform: translateX(0);
+    }
+    .step-item.completed .step-status-badge {
+      color: var(--neon-cyan);
+      background: rgba(0, 245, 212, 0.08);
+    }
+
+    .hud-controls {
+      margin-top: 22px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+
+    .btn-neon {
+      background: transparent;
+      color: var(--neon-cyan);
+      border: 1px solid var(--neon-cyan);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      cursor: pointer;
+      transition: transform 0.18s ease, opacity 0.18s ease;
+    }
+
+    .btn-neon:hover {
+      transform: translateY(-2px);
+      background: rgba(0, 245, 212, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="hud-wrapper">
+    <div class="hud-header">
+      <div class="hud-title">
+        <span>❖</span> PCI SOVEREIGN ENGINE // NEON TRIQUETRA HUD
+      </div>
+      <div class="hud-badge" id="hudStateLabel">SISTEMA EM EXECUÇÃO</div>
+    </div>
+
+    <div class="hud-grid">
+      <!-- Lado Esquerdo: Triquetra Tech Neon Spinner + Barra de Progresso -->
+      <div class="triquetra-panel">
+        <div class="triquetra-svg-box">
+          <svg class="triquetra-svg" viewBox="-120 -120 240 240" id="triquetraSvg">
+            <defs>
+              <linearGradient id="triquetraGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#00f5d4" />
+                <stop offset="50%" stop-color="#00bbf9" />
+                <stop offset="100%" stop-color="#ff007f" />
+              </linearGradient>
+            </defs>
+            <!-- Curva Paramétrica da Triquetra gerada no carregamento -->
+            <path id="triquetraTrack" class="triquetra-track" d="" />
+            <path id="triquetraBeam" class="triquetra-neon-beam" d="" />
+            <path id="triquetraCore" class="triquetra-neon-core" d="" />
+          </svg>
+          <div class="triquetra-center-pct" id="pctCenter">0%</div>
+        </div>
+
+        <div class="progress-container">
+          <div class="progress-meta">
+            <span id="stageNameMeta">INICIALIZANDO PIPELINE...</span>
+            <span id="pctBarText">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progressBarFill"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lado Direito: Lista de Tarefas da IA (AI Step Tracker) -->
+      <div class="steps-panel" id="stepsContainer">
+        <div class="step-item pending" data-step="0">
+          <div class="step-left">
+            <span class="step-index">01 //</span>
+            <span class="step-title">Preflight Hardware &amp; Git Worktree Sandbox</span>
+          </div>
+          <div class="step-status-badge">
+            <span class="mini-spinner"></span>
+            <span class="badge-text">PENDING</span>
+          </div>
+        </div>
+
+        <div class="step-item pending" data-step="1">
+          <div class="step-left">
+            <span class="step-index">02 //</span>
+            <span class="step-title">Decomposição DAG &amp; Context Slicing (&le; 3 Arq)</span>
+          </div>
+          <div class="step-status-badge">
+            <span class="mini-spinner"></span>
+            <span class="badge-text">PENDING</span>
+          </div>
+        </div>
+
+        <div class="step-item pending" data-step="2">
+          <div class="step-left">
+            <span class="step-index">03 //</span>
+            <span class="step-title">Inferência Soberana (Qwen 2.5 Coder / Hybrid API)</span>
+          </div>
+          <div class="step-status-badge">
+            <span class="mini-spinner"></span>
+            <span class="badge-text">PENDING</span>
+          </div>
+        </div>
+
+        <div class="step-item pending" data-step="3">
+          <div class="step-left">
+            <span class="step-index">04 //</span>
+            <span class="step-title">Inspeção Sintática AST &amp; Guardrail de Escopo</span>
+          </div>
+          <div class="step-status-badge">
+            <span class="mini-spinner"></span>
+            <span class="badge-text">PENDING</span>
+          </div>
+        </div>
+
+        <div class="step-item pending" data-step="4">
+          <div class="step-left">
+            <span class="step-index">05 //</span>
+            <span class="step-title">Execução TDD Pytest &amp; Commit Verificado</span>
+          </div>
+          <div class="step-status-badge">
+            <span class="mini-spinner"></span>
+            <span class="badge-text">PENDING</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hud-controls">
+      <button class="btn-neon" onclick="advanceStep()">⟡ Avançar Etapa Manual</button>
+      <button class="btn-neon" onclick="startAutoSimulation()">◈ Simular Ciclo Completo da IA</button>
+    </div>
+  </div>
+
+  <script>
+    // Constrói matematicamente o caminho SVG do nó Triquetra (Trefoil Knot):
+    // x(t) = sin(t) + 2*sin(2t), y(t) = cos(t) - 2*cos(2t)
+    function buildTriquetraPath() {
+      const points = [];
+      const steps = 180;
+      const scale = 31;
+      for (let i = 0; i <= steps; i++) {
+        const t = (i / steps) * Math.PI * 2;
+        const x = (Math.sin(t) + 2 * Math.sin(2 * t)) * scale;
+        const y = (Math.cos(t) - 2 * Math.cos(2 * t)) * scale;
+        points.push(`${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`);
+      }
+      points.push('Z');
+      const d = points.join(' ');
+      document.getElementById('triquetraTrack').setAttribute('d', d);
+      document.getElementById('triquetraBeam').setAttribute('d', d);
+      document.getElementById('triquetraCore').setAttribute('d', d);
+    }
+
+    let currentStep = 0;
+    let simTimer = null;
+    const totalSteps = 5;
+
+    function setStepState(activeIndex, progressPct) {
+      const items = document.querySelectorAll('.step-item');
+      items.forEach((el, idx) => {
+        el.classList.remove('pending', 'active', 'completed');
+        const badgeText = el.querySelector('.badge-text');
+        if (idx < activeIndex) {
+          el.classList.add('completed');
+          badgeText.textContent = '✓ COMPLETED';
+        } else if (idx === activeIndex && activeIndex < totalSteps) {
+          el.classList.add('active');
+          badgeText.textContent = 'EXECUTANDO';
+        } else {
+          el.classList.add('pending');
+          badgeText.textContent = 'PENDING';
+        }
+      });
+
+      const pct = Math.min(100, Math.max(0, Math.round(progressPct)));
+      document.getElementById('pctCenter').textContent = pct + '%';
+      document.getElementById('pctBarText').textContent = pct + '%';
+      document.getElementById('progressBarFill').style.width = pct + '%';
+
+      const labels = [
+        'ETAPA 01 // PREFLIGHT & SANDBOX',
+        'ETAPA 02 // CONTEXT SLICING',
+        'ETAPA 03 // INFERÊNCIA NEURAL',
+        'ETAPA 04 // VALIDAÇÃO AST',
+        'ETAPA 05 // AUDITORIA PYTEST',
+        'CICLO CONCLUÍDO // 100% VERIFICADO'
+      ];
+      document.getElementById('stageNameMeta').textContent = labels[Math.min(activeIndex, labels.length - 1)];
+      document.getElementById('hudStateLabel').textContent =
+        pct >= 100 ? '✓ PIPELINE VERIFICADO' : '❖ EXECUÇÃO ATIVA';
+    }
+
+    function advanceStep() {
+      currentStep = (currentStep + 1) % (totalSteps + 1);
+      const pct = (currentStep / totalSteps) * 100;
+      setStepState(currentStep, pct);
+    }
+
+    function startAutoSimulation() {
+      if (simTimer) clearInterval(simTimer);
+      currentStep = 0;
+      let pct = 0;
+      setStepState(0, 5);
+      simTimer = setInterval(() => {
+        pct += 4;
+        const stepIdx = Math.min(totalSteps, Math.floor((pct / 100) * totalSteps));
+        setStepState(stepIdx, pct);
+        if (pct >= 100) {
+          clearInterval(simTimer);
+          simTimer = null;
+        }
+      }, 140);
+    }
+
+    buildTriquetraPath();
+    startAutoSimulation();
+  </script>
+</body>
+</html>

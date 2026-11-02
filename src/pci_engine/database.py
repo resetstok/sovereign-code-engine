@@ -392,6 +392,39 @@ class DatabaseManager:
                 conn.commit()
             return PromotedTasksList(unlocked_ids)
 
+    def delete_task(self, task_id: str) -> bool:
+        """Remove uma tarefa específica da fila tasks_queue."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM tasks_queue WHERE task_id = ?", (task_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def clear_completed_tasks(self) -> int:
+        """Remove todas as tarefas com status VERIFIED da fila tasks_queue."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM tasks_queue WHERE status = 'VERIFIED'")
+            conn.commit()
+            return cursor.rowcount
+
+    def reset_task_for_retry(self, task_id: str) -> bool:
+        """Reseta uma tarefa para PENDING e zera o contador de tentativas."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE tasks_queue
+                SET status = 'PENDING',
+                    attempts = 0,
+                    assigned_route = NULL,
+                    leased_by_node = NULL,
+                    lease_expires_at = NULL,
+                    last_error_log = NULL
+                WHERE task_id = ?
+                """,
+                (task_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
     # -------------------------------------------------------------------------
     # CRUD: 4. LIVRO-RAZÃO DE KUDOS (Kudos Ledger)
     # -------------------------------------------------------------------------
