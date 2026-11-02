@@ -49,3 +49,6 @@ ENV/
 .idea/
 .DS_Store
 Thumbs.db
+
+config/*.secret
+config/broker_token.secret

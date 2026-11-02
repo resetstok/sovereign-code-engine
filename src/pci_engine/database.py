@@ -84,18 +84,6 @@ CREATE TABLE IF NOT EXISTS kudos_ledger (
 );
 
 -- 5. CADEIA DE CUSTÓDIA E SANITIZAÇÃO (OSINT / Forense)
-CREATE TABLE IF NOT EXISTS evidence_manifest (
-    evidence_id TEXT PRIMARY KEY,
-    original_sha256 TEXT NOT NULL,
-    source_url TEXT NOT NULL,
-    acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    custody_status TEXT CHECK(custody_status IN ('FULL_BYTES_STORED', 'HASH_ONLY')) NOT NULL,
-    derivative_sha256 TEXT,
-    metadata_stripped BOOLEAN DEFAULT 0,
-    stripped_categories TEXT,
-    tool_version TEXT,
-    drive_sync_status TEXT CHECK(drive_sync_status IN ('LOCAL_SPOOL', 'UPLOADED_VERIFIED')) DEFAULT 'LOCAL_SPOOL'
-);
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks_queue(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_deps ON tasks_queue(depends_on_task_id);

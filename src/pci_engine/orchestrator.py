@@ -286,6 +286,14 @@ class TaskExecutionOrchestrator:
         test_code = task["test_code"]
         branch_name = f"pci-task/{task_id}"
 
+        # Se a tarefa nao possuir codigo de teste ou estiver vazio, rejeita terminantemente
+        if not test_code or not test_code.strip():
+            logger.error(f"TAREFA REJEITADA ({task_id}): Nao ha codigo de teste associado.")
+            return {
+                "success": False,
+                "error": "REJEICAO_ESTRITA: Tarefas sem arquivo de teste unitario nao podem ser executadas nem marcadas como VERIFIED.",
+            }
+
         worktree_dir = (self.repo_root / "data" / "sandboxes" / f"sandbox_{task_id}").resolve()
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
 

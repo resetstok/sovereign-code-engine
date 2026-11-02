@@ -36,7 +36,23 @@ REPO_ROOT = Path(".").resolve()
 # =============================================================================
 # Autenticação via Token Revogável (Header: X-PCI-Donor-Token)
 # =============================================================================
-DEFAULT_DONOR_TOKEN = os.getenv("PCI_DONOR_TOKEN", "pci-donor-tailscale-token-2026")
+def _load_or_create_broker_token() -> str:
+    env_token = os.getenv("PCI_DONOR_TOKEN")
+    if env_token:
+        return env_token
+    token_path = Path("config/broker_token.secret")
+    if token_path.exists():
+        t = token_path.read_text(encoding="utf-8").strip()
+        if t:
+            return t
+    import secrets
+    t = secrets.token_urlsafe(32)
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(t, encoding="utf-8")
+    return t
+
+
+DEFAULT_DONOR_TOKEN = _load_or_create_broker_token()
 REVOKED_DONOR_TOKENS: Set[str] = set()
 
 
@@ -288,34 +304,34 @@ def get_kudos_v1(node_id: str, token: str = Depends(verify_donor_token)):
 
 
 # =============================================================================
-# ENDPOINTS LEGADOS / COMPATIBILIDADE (Sem prefixo /api/v1)
+# ENDPOINTS LEGADOS / COMPATIBILIDADE (Exigem autenticacao de token obrigatoria)
 # =============================================================================
 @app.post("/nodes/register")
-def register_node_legacy(req: RegisterNodeRequest):
-    return register_node_v1(req, token=DEFAULT_DONOR_TOKEN)
+def register_node_legacy(req: RegisterNodeRequest, token: str = Depends(verify_donor_token)):
+    return register_node_v1(req, token=token)
 
 
 @app.post("/nodes/heartbeat")
-def node_heartbeat_legacy(req: HeartbeatRequest):
-    return node_heartbeat_v1(req, token=DEFAULT_DONOR_TOKEN)
+def node_heartbeat_legacy(req: HeartbeatRequest, token: str = Depends(verify_donor_token)):
+    return node_heartbeat_v1(req, token=token)
 
 
 @app.get("/tasks/lease")
-def lease_task_legacy(node_id: str = Query(...)):
-    return lease_task_v1(node_id=node_id, token=DEFAULT_DONOR_TOKEN)
+def lease_task_legacy(node_id: str = Query(...), token: str = Depends(verify_donor_token)):
+    return lease_task_v1(node_id=node_id, token=token)
 
 
 @app.post("/tasks/{task_id}/submit")
-def submit_task_legacy(task_id: str, req: SubmissionRequest):
+def submit_task_legacy(task_id: str, req: SubmissionRequest, token: str = Depends(verify_donor_token)):
     submit_req = SubmitTaskRequest(
         task_id=task_id,
         node_id=req.node_id,
         candidate_code=req.candidate_code,
         compute_seconds=req.compute_seconds,
     )
-    return submit_task_v1(submit_req, token=DEFAULT_DONOR_TOKEN)
+    return submit_task_v1(submit_req, token=token)
 
 
 @app.get("/kudos/{node_id}")
-def get_kudos_legacy(node_id: str):
-    return get_kudos_v1(node_id, token=DEFAULT_DONOR_TOKEN)
+def get_kudos_legacy(node_id: str, token: str = Depends(verify_donor_token)):
+    return get_kudos_v1(node_id, token=token)

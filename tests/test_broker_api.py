@@ -394,10 +394,12 @@ def test_submit_task_failed_test_rejects(client: TestClient, test_db: DatabaseMa
 # =============================================================================
 
 def test_legacy_routes_backward_compatibility(client: TestClient, test_db: DatabaseManager, monkeypatch):
-    """Garante que rotas legadas (/nodes/register, /tasks/lease, etc) continuam funcionando."""
+    """Garante que rotas legadas (/nodes/register, /tasks/lease, etc) funcionam exigindo autenticacao valida."""
+    headers = {"X-PCI-Donor-Token": DEFAULT_DONOR_TOKEN}
     # Cadastro legado
     resp_reg = client.post(
         "/nodes/register",
+        headers=headers,
         json={
             "node_id": "DONOR_LEGACY_01",
             "node_name": "DOADOR_LEGADO",
@@ -409,11 +411,11 @@ def test_legacy_routes_backward_compatibility(client: TestClient, test_db: Datab
     assert resp_reg.status_code == 200
 
     # Heartbeat legado
-    resp_hb = client.post("/nodes/heartbeat", json={"node_id": "DONOR_LEGACY_01", "status": "ONLINE"})
+    resp_hb = client.post("/nodes/heartbeat", headers=headers, json={"node_id": "DONOR_LEGACY_01", "status": "ONLINE"})
     assert resp_hb.status_code == 200
 
     # Consulta de Kudos legada
-    resp_kudos = client.get("/kudos/DONOR_LEGACY_01")
+    resp_kudos = client.get("/kudos/DONOR_LEGACY_01", headers=headers)
     assert resp_kudos.status_code == 200
     assert "kudos_balance" in resp_kudos.json()
 

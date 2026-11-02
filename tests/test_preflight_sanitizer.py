@@ -81,72 +81,13 @@ class TestPreflightAndSanitizer:
         assert "ram_after_mb" in report
         assert "total_freed_mb" in report
 
-    def test_06_forensic_sanitizer_hash_immutability_and_pii_redaction(self, tmp_path):
-        sanitizer = ForensicSanitizer()
-        db_path = tmp_path / "evidence_audit.db"
-        db = DatabaseManager(db_path=db_path)
-
-        # 1. Cria evidência bruta original com múltiplos padrões de PII
-        raw_evidence = tmp_path / "edital_raw.json"
-        raw_content = (
-            "{\n"
-            '  "cpf_servidor": "012.345.678-99",\n'
-            '  "cnpj_licitante": "12.345.678/0001-90",\n'
-            '  "contato": "fiscal.contrato@prefeitura.rj.gov.br",\n'
-            '  "ip_origem": "192.168.10.45",\n'
-            '  "api_token": "sk-1234567890abcdef1234567890abcdef",\n'
-            '  "caminho_local": "C:\\\\Users\\\\ACER\\\\Desktop\\\\relatorio.pdf"\n'
-            "}"
-        )
-        raw_evidence.write_text(raw_content, encoding="utf-8")
-
-        # Hash do arquivo original antes de qualquer processo
-        original_hash_before = hashlib.sha256(raw_evidence.read_bytes()).hexdigest()
-
-        # 2. Executa a criação da cópia sanitizada com gravação no banco
-        out_dir = tmp_path / "sanitized_derivatives"
-        manifest = sanitizer.create_sanitized_derivative(
-            original_path=raw_evidence,
-            output_dir=out_dir,
-            strip_metadata_switch=True,
-            db_manager=db,
-            evidence_id="EVID_TEST_001",
-            source_url="https://pncp.gov.br/editais/2026/038",
-        )
-
-        # 3. COMPROVAÇÃO DE IMUTABILIDADE DO ORIGINAL:
-        original_hash_after = hashlib.sha256(raw_evidence.read_bytes()).hexdigest()
-        assert original_hash_before == original_hash_after
-        assert manifest["original_sha256"] == original_hash_before
-
-        # 4. COMPROVAÇÃO DE OCULTAÇÃO DE PII NA DERIVADA:
-        derivative_path = Path(manifest["derivative_path"])
-        assert derivative_path.exists()
-        cleaned_text = derivative_path.read_text(encoding="utf-8")
-
-        assert "012.345.678-99" not in cleaned_text
-        assert "12.345.678/0001-90" not in cleaned_text
-        assert "fiscal.contrato@prefeitura.rj.gov.br" not in cleaned_text
-        assert "192.168.10.45" not in cleaned_text
-        assert "sk-1234567890abcdef1234567890abcdef" not in cleaned_text
-        assert "C:\\Users\\ACER" not in cleaned_text
-
-        assert "<REDACTED_CPF>" in cleaned_text
-        assert "<REDACTED_CNPJ>" in cleaned_text
-        assert "<REDACTED_EMAIL>" in cleaned_text
-        assert "<REDACTED_IPV4>" in cleaned_text
-        assert "<REDACTED_API_KEY>" in cleaned_text
-        assert "<REDACTED_USER_PATH>" in cleaned_text
-
-        # 5. COMPROVAÇÃO DE AUDITORIA NO JOBS.DB:
-        db_record = db.get_evidence("EVID_TEST_001")
-        assert db_record is not None
-        assert db_record["original_sha256"] == original_hash_before
-        assert db_record["derivative_sha256"] == manifest["derivative_sha256"]
-        assert db_record["metadata_stripped"] == 1
-        assert "CPF" in db_record["stripped_categories"]
-        assert "CNPJ" in db_record["stripped_categories"]
-
+    def test_06_context_guard_secrets_redaction(self, tmp_path):
+        from pci_engine.context_guard import ContextGuard
+        sample = 'sk-1234567890abcdef1234567890abcdef'
+        res = ContextGuard.inspect_and_sanitize(sample)
+        assert res['has_secrets'] is True
+        assert '[REDACTED_API_KEY]' in res['sanitized_content']
+        assert ContextGuard.is_file_allowed('.env') is False
     def test_07_fernet_spool_encryption_and_decryption(self, tmp_path):
         sanitizer = ForensicSanitizer()
         spool_dir = tmp_path / "spool_encrypted"

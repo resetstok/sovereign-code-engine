@@ -13,8 +13,10 @@ map-tokens: 0
 auto-test: true
 test-cmd: pytest -q --tb=short
 
-# Controle de Versão: Commits atômicos somente quando os testes passarem
-auto-commits: true
+# Controle de Versão Seguro (Audit Gate):
+# Commits e alterações diretas desativadas. O operador deve aprovar o diff antes de commitar.
+auto-commits: false
+dirty-commits: false
 commit-language: pt-BR
 
 # Estilo e Interface
