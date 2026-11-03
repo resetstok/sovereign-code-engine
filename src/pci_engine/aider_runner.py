@@ -9,6 +9,7 @@ import difflib
 import os
 import shutil
 import subprocess
+from pci_engine.runtime_utils import get_subprocess_creation_flags
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -64,6 +65,8 @@ class AiderRunner:
             self._aider_cmd,
             "--no-show-model-warnings",
             "--no-git-commit-verify",
+            "--no-check-update",
+            "--no-analytics",
             "--map-tokens", "0",
             "--encoding", "utf-8",
             "--exit",
@@ -128,12 +131,14 @@ class AiderRunner:
             proc = subprocess.run(
                 cmd,
                 cwd=str(self.repo_root),
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 encoding="utf-8",
                 errors="ignore",
                 env=custom_env,
+                creationflags=get_subprocess_creation_flags(),
             )
             return {
                 "success": proc.returncode == 0,
@@ -163,12 +168,14 @@ class AiderRunner:
             proc = subprocess.run(
                 cmd,
                 cwd=str(self.repo_root),
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 encoding="utf-8",
                 errors="ignore",
                 env=custom_env,
+                creationflags=get_subprocess_creation_flags(),
             )
             return {
                 "success": proc.returncode == 0,
