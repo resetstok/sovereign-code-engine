@@ -212,19 +212,6 @@ class ContextGuard:
         }
 
     @classmethod
-    def get_or_set_operator_password(cls, repo_root: Optional[Path | str] = None) -> str:
-        """Obtém ou gera a senha/chave de custódia do operador para trancar o spool."""
-        root = Path(repo_root) if repo_root else Path(".")
-        pass_file = (root / "config" / "operator_password.secret").resolve()
-        if pass_file.exists():
-            return pass_file.read_text(encoding="utf-8").strip()
-        import secrets
-        pwd = secrets.token_urlsafe(16)
-        pass_file.parent.mkdir(parents=True, exist_ok=True)
-        pass_file.write_text(pwd, encoding="utf-8")
-        return pwd
-
-    @classmethod
     def get_or_create_spool_key(cls, repo_root: Optional[Path | str] = None) -> bytes:
         """Obtém ou cria a chave Fernet AES para trancar dados sensíveis no spool."""
         root = Path(repo_root) if repo_root else Path(".")

@@ -39,6 +39,8 @@ def build_executable():
         f"--paths={str(root_dir / 'src')}",
         f"--add-data={str(root_dir / 'config')}{sep}config",
         f"--add-data={str(root_dir / 'assets')}{sep}assets",
+        f"--add-data={str(root_dir / 'tasks')}{sep}tasks",
+        f"--add-data={str(root_dir / 'donor_client')}{sep}donor_client",
         "--collect-all", "customtkinter",
         "--hidden-import", "pci_engine",
         "--hidden-import", "pci_engine.mtv_core",

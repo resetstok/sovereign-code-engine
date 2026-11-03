@@ -97,14 +97,19 @@ class PCIMasterGUI:
         headless_test: bool = False,
     ) -> None:
         if repo_root:
-            self.repo_root = Path(repo_root)
+            self.repo_root = Path(repo_root).resolve()
         elif getattr(sys, "frozen", False):
             # Se executado via dist/PCI_Master_System/PCI_Master_System.exe
-            candidate_parent = Path(sys.executable).resolve().parents[1]
-            if (candidate_parent / "assets" / "triquetra_hud.html").exists():
-                self.repo_root = candidate_parent
+            exe_path = Path(sys.executable).resolve()
+            found_root = None
+            for p in [exe_path.parent] + list(exe_path.parents):
+                if (p / "assets" / "triquetra_hud.html").exists() and (p / "tasks").exists():
+                    found_root = p
+                    break
+            if found_root:
+                self.repo_root = found_root
             else:
-                self.repo_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+                self.repo_root = Path(getattr(sys, "_MEIPASS", exe_path.parent))
         else:
             self.repo_root = Path(__file__).resolve().parents[2]
         self.db_path = Path(db_path) if db_path else self.repo_root / "data" / "jobs.db"
@@ -1322,79 +1327,82 @@ class PCIMasterGUI:
 
 
         btn_forensic_row = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_forensic_row.pack(fill="x", padx=15, pady=8)
+        btn_forensic_row.pack(fill="x", padx=15, pady=(8, 4))
+        btn_forensic_row.grid_columnconfigure(0, weight=1)
+        btn_forensic_row.grid_columnconfigure(1, weight=1)
 
         btn_extract_inv = ctk.CTkButton(
             btn_forensic_row,
-            text="❖ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados)",
+            text="❖ Extrair & Cruzar Vínculos (100% Local)",
             command=self._on_extract_investigative_clicked,
             fg_color="#00f5d4",
             text_color="#070a10",
             hover_color="#00bbf9",
-            height=36,
-            font=ctk.CTkFont(size=12, weight="bold"),
+            height=34,
+            font=ctk.CTkFont(size=11, weight="bold"),
         )
-        btn_extract_inv.pack(side="left", padx=(0, 10))
+        btn_extract_inv.grid(row=0, column=0, padx=(0, 5), pady=2, sticky="ew")
         self._attach_interactive_hover(
             btn_extract_inv,
-            "❖ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados)",
-            "❖ Extrair & Cruzar Vínculos (100% Local — Sem Ocultar Dados) ➔",
+            "❖ Extrair & Cruzar Vínculos (100% Local)",
+            "❖ Extrair & Cruzar Vínculos (100% Local) ➔",
             base_border="#00f5d4",
             hover_border="#ffffff",
         )
 
         btn_generate_derived = ctk.CTkButton(
             btn_forensic_row,
-            text="❖ Trancar e Salvar no Spool Cifrado",
+            text="🔒 Trancar e Salvar no Spool Cifrado",
             command=self._on_generate_sanitized_derivative,
             fg_color="#162238",
             text_color="#00bbf9",
             hover_color="#1f3252",
-            height=36,
-            font=ctk.CTkFont(size=12, weight="bold"),
+            height=34,
+            font=ctk.CTkFont(size=11, weight="bold"),
         )
-        btn_generate_derived.pack(side="left", padx=(0, 10))
+        btn_generate_derived.grid(row=0, column=1, padx=(5, 0), pady=2, sticky="ew")
+        self._attach_interactive_hover(
+            btn_generate_derived,
+            "🔒 Trancar e Salvar no Spool Cifrado",
+            "🔒 Trancar e Salvar no Spool Cifrado ➔",
+            base_border="#00bbf9",
+            hover_border="#00f5d4",
+        )
+
         btn_lock_donor_vault = ctk.CTkButton(
             btn_forensic_row,
-            text="❖ Trancar Extração com Senha do Operador (Pasta do Doador)",
+            text="🔑 Trancar Extração c/ Senha (Pasta do Doador)",
             command=self._on_lock_donor_vault_clicked,
             fg_color="#7209b7",
             text_color="#ffffff",
             hover_color="#560bad",
-            height=36,
-            font=ctk.CTkFont(size=12, weight="bold"),
+            height=34,
+            font=ctk.CTkFont(size=11, weight="bold"),
         )
-        btn_lock_donor_vault.pack(side="left", padx=(0, 10))
+        btn_lock_donor_vault.grid(row=1, column=0, padx=(0, 5), pady=4, sticky="ew")
         self._attach_interactive_hover(
             btn_lock_donor_vault,
-            "❖ Trancar Extração com Senha do Operador (Pasta do Doador)",
-            "❖ Trancar Extração com Senha do Operador (Pasta do Doador) ➔",
+            "🔑 Trancar Extração c/ Senha (Pasta do Doador)",
+            "🔑 Trancar Extração c/ Senha (Pasta do Doador) ➔",
             base_border="#7209b7",
-            hover_border="#00f5d4",
-        )
-        self._attach_interactive_hover(
-            btn_generate_derived,
-            "❖ Trancar e Salvar no Spool Cifrado",
-            "❖ Trancar e Salvar no Spool Cifrado ➔",
-            base_border="#00bbf9",
             hover_border="#00f5d4",
         )
 
         btn_sync_drive = ctk.CTkButton(
             btn_forensic_row,
-            text="❖ Sincronizar Spool com Google Drive",
+            text="☁ Sincronizar Spool com Google Drive (Rclone)",
             command=self._on_sync_drive_clicked,
             fg_color="#f77f00",
             text_color="#070a10",
             hover_color="#fcbf49",
-            height=36,
-            font=ctk.CTkFont(size=12, weight="bold"),
+            height=34,
+            font=ctk.CTkFont(size=11, weight="bold"),
         )
-        btn_sync_drive.pack(side="left")
+        btn_sync_drive.grid(row=1, column=1, padx=(5, 0), pady=4, sticky="ew")
         self._attach_interactive_hover(
             btn_sync_drive,
-            "❖ Sincronizar Spool com Google Drive",
-            "❖ Sincronizar Spool com Google Drive ➔",
+            "☁ Sincronizar Spool com Google Drive (Rclone)",
+            "☁ Sincronizar Spool com Google Drive (Rclone) ➔",
             base_border="#f77f00",
             hover_border="#ffffff",
         )
@@ -1866,13 +1874,14 @@ class PCIMasterGUI:
         def _run() -> None:
             self.log("Iniciando rotina de higiene de memória RAM e limpeza de caches temporários...")
             res = RAMLiberator.execute_hygiene_pipeline(
-                repo_root=self.repo_root,
                 auto_terminate=True,
-                min_process_mb=15.0,
+                repo_root=self.repo_root,
             )
+            freed_mb = res.get("total_freed_mb", 0.0)
+            term_count = res.get("terminated_processes_count", 0)
             self.log(
                 f"[Etapa 1/2] Processos de segundo plano limpos automaticamente: "
-                f"{res.total_freed_mb} MB liberados ({len(res.terminated_pids)} processos encerrados)."
+                f"{freed_mb:.1f} MB liberados ({term_count} processos encerrados)."
             )
 
             heavy_candidates, heavy_mb = RAMLiberator.scan_heavy_interactive_processes()

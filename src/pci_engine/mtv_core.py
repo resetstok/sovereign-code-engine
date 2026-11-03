@@ -141,7 +141,7 @@ class RunResult:
 
 def run_candidate(task_dir: Path, code: str, timeout: float = 20.0) -> RunResult:
     """Roda os testes da tarefa contra um candidato, em pasta temporaria."""
-    with tempfile.TemporaryDirectory(prefix="mtv_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="mtv_", ignore_cleanup_errors=True) as tmp:
         work = Path(tmp)
         (work / "solution.py").write_text(code, encoding="utf-8")
         for test_file in task_dir.glob("test_*.py"):
