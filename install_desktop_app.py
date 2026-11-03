@@ -40,6 +40,7 @@ def get_windows_desktop() -> Path:
 def create_desktop_shortcut(
     repo_root: Path | str = "C:/Lab/013 - Sovereign-Code-Engine",
     shortcut_name: str = "PCI Master System v2.0.lnk",
+    target_file: Optional[Path | str] = None,
 ) -> Path:
     """
     Cria ou atualiza o atalho .lnk na Área de Trabalho do Windows.
@@ -56,15 +57,18 @@ def create_desktop_shortcut(
         icon_path = generate_pci_icon(repo_path / "assets")
 
     # 2. Define o alvo de execução
-    compiled_exe = repo_path / "dist" / "PCI_Master_System" / "PCI_Master_System.exe"
-    launcher_bat = repo_path / "launch_pci.bat"
-
-    if compiled_exe.is_file():
-        target_path = compiled_exe
-        description = "PCI Master System v2.0 (Sovereign Code Engine Standalone)"
+    if target_file:
+        target_path = Path(target_file).resolve()
+        description = f"PCI Sovereign App ({Path(target_file).stem})"
     else:
-        target_path = launcher_bat
-        description = "PCI Master System v2.0 (Sovereign Code Engine Silent Launcher)"
+        compiled_exe = repo_path / "dist" / "PCI_Master_System" / "PCI_Master_System.exe"
+        launcher_bat = repo_path / "launch_pci.bat"
+        if compiled_exe.is_file():
+            target_path = compiled_exe
+            description = "PCI Master System v2.0 (Sovereign Code Engine Standalone)"
+        else:
+            target_path = launcher_bat
+            description = "PCI Master System v2.0 (Sovereign Code Engine Silent Launcher)"
 
     # 3. Executa o script PowerShell para criar o .lnk via WScript.Shell nativo do Windows
     ps_command = f"""
