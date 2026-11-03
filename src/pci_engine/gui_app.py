@@ -1939,25 +1939,18 @@ class PCIMasterGUI:
 
             def _start_server() -> None:
                 try:
-                    cmd = [
-                        sys.executable,
-                        "-m",
-                        "uvicorn",
-                        "pci_engine.broker_api:app",
-                        "--host",
-                        "0.0.0.0",
-                        "--port",
-                        "8000",
-                    ]
-                    creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                    self._broker_process = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        creationflags=creation_flags,
+                    import uvicorn
+                    from pci_engine.broker_api import app as fastapi_app
+                    config = uvicorn.Config(
+                        fastapi_app,
+                        host="0.0.0.0",
+                        port=8000,
+                        log_level="warning",
                     )
+                    self._broker_server = uvicorn.Server(config)
                     self.dispatch_to_ui(lambda: self.broker_status_var.set("Broker: ONLINE (Porta 8000)"))
-                    self.log("Broker FastAPI ATIVO! Pronto para receber solicitações de Pull & Lease de doadores.")
+                    self.log("Broker FastAPI ATIVO na porta 8000! Pronto para receber solicitações da rede Tailscale.")
+                    self._broker_server.run()
                 except Exception as exc:
                     self.log(f"Falha ao iniciar servidor broker: {exc}")
                     self.dispatch_to_ui(lambda: self.is_broker_running.set(False))
@@ -1965,9 +1958,16 @@ class PCIMasterGUI:
             threading.Thread(target=_start_server, daemon=True).start()
         else:
             self.log("Encerrando Broker FastAPI...")
-            if self._broker_process:
-                self._broker_process.terminate()
+            if hasattr(self, "_broker_server") and self._broker_server:
+                self._broker_server.should_exit = True
+                self._broker_server = None
+            if hasattr(self, "_broker_process") and self._broker_process:
+                try:
+                    self._broker_process.terminate()
+                except Exception:
+                    pass
                 self._broker_process = None
+            self.broker_status_var.set("Broker: Inativo")
             self.broker_status_var.set("Broker: Inativo")
             self.log("Broker desativado.")
 
@@ -2477,7 +2477,7 @@ class PCIMasterGUI:
                             f"Nó Doador / Origem:   {vault.get('node_name', 'MASTER_NODE')}\n"
                             f"Caminho do Pacote:    {vault.get('relative_spool_path')}\n"
                             f"SHA-256 Original:     {vault.get('original_sha256')}\n"
-                            f"Tamanho Cifrado:      {vault.get('encrypted_bytes_size')} bytes\n"
+                            f"Tamanho Cifrado:      {vault.get('encrypted_bytes_size') or vault.get('encrypted_bytes_count') or 0} bytes\n"
                             "Status Sincronização: Pronto para Offload Seguro no Drive (Subpasta do Doador)\n"
                             "=========================================================================\n"
                         )
@@ -2501,8 +2501,9 @@ class PCIMasterGUI:
             messagebox.showwarning("Aviso", "Selecione um arquivo existente para sanitizar.")
             return
 
+        self.encrypt_spool_var.set(True)
         remove_pii = self.remove_pii_var.get()
-        encrypt_spool = self.encrypt_spool_var.get()
+        encrypt_spool = True
 
         def _run() -> None:
             self.log(f"Processando custódia forense para: {Path(raw_path).name}...")
@@ -2956,4 +2957,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

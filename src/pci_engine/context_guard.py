@@ -208,6 +208,7 @@ class ContextGuard:
             "encrypted_sha256": enc_sha256,
             "raw_bytes_count": len(raw_bytes),
             "encrypted_bytes_count": len(encrypted_payload),
+            "encrypted_bytes_size": len(encrypted_payload),
             "protected_by_operator_password": True,
         }
 

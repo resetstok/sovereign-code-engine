@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from pci_engine.database import DatabaseManager
+from pci_engine.runtime_utils import get_real_rclone_binary, get_subprocess_creation_flags
 
 logger = logging.getLogger("pci_engine.drive_sync")
 
@@ -46,6 +47,7 @@ class DriveSyncManager:
         self.remote_dest = remote_dest
         self.db_path = Path(db_path).resolve() if db_path else None
         self.db = DatabaseManager(db_path=self.db_path) if self.db_path and self.db_path.exists() else None
+        self.rclone_bin = get_real_rclone_binary()
 
     @staticmethod
     def check_internet(host: str = "8.8.8.8", port: int = 53, timeout: float = 3.0) -> bool:
@@ -69,8 +71,9 @@ class DriveSyncManager:
 
     @staticmethod
     def is_rclone_available() -> bool:
-        """Verifica se o binário rclone está instalado e acessível no PATH."""
-        return shutil.which("rclone") is not None
+        """Verifica se o binário rclone está instalado e acessível no PATH ou Chocolatey."""
+        bin_path = get_real_rclone_binary()
+        return shutil.which(bin_path) is not None or Path(bin_path).is_file()
 
     def list_pending_packages(self) -> List[Path]:
         """Lista todos os pacotes criptografados pendentes no spool local (incluindo subpastas de nós doadores)."""
@@ -111,10 +114,18 @@ class DriveSyncManager:
         Retorna (sucesso, mensagem).
         """
         remote_target = self._get_remote_target(file_path)
-        cmd = ["rclone", "copyto", str(file_path), remote_target]
+        cmd = [getattr(self, "rclone_bin", get_real_rclone_binary()), "copyto", str(file_path), remote_target]
+        flags = get_subprocess_creation_flags()
 
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            proc = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                creationflags=flags,
+            )
             if proc.returncode == 0:
                 return True, "Upload concluído"
             return False, f"Falha no rclone copyto: {proc.stderr.strip()}"
@@ -132,9 +143,18 @@ class DriveSyncManager:
         local_info = self.calculate_file_hashes(file_path)
 
         # 1. Verifica existência e tamanho remoto via rclone size
-        cmd_size = ["rclone", "size", remote_target, "--json"]
+        r_bin = getattr(self, "rclone_bin", get_real_rclone_binary())
+        flags = get_subprocess_creation_flags()
+        cmd_size = [r_bin, "size", remote_target, "--json"]
         try:
-            proc_size = subprocess.run(cmd_size, capture_output=True, text=True, timeout=30)
+            proc_size = subprocess.run(
+                cmd_size,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=flags,
+            )
             if proc_size.returncode != 0:
                 return False, f"Arquivo não encontrado no remoto: {proc_size.stderr.strip()}"
 
@@ -144,8 +164,15 @@ class DriveSyncManager:
                 return False, f"Tamanho divergente: local={local_info['size_bytes']} vs remoto={remote_bytes}"
 
             # 2. Confere hash MD5 se suportado pelo remoto
-            cmd_hash = ["rclone", "md5sum", remote_target]
-            proc_hash = subprocess.run(cmd_hash, capture_output=True, text=True, timeout=30)
+            cmd_hash = [r_bin, "md5sum", remote_target]
+            proc_hash = subprocess.run(
+                cmd_hash,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=flags,
+            )
             if proc_hash.returncode == 0 and proc_hash.stdout.strip():
                 remote_md5 = proc_hash.stdout.split()[0].strip().lower()
                 if remote_md5 and remote_md5 != local_info["md5"].lower():

@@ -294,8 +294,26 @@ class DonorWorkerAgent:
         target_file.write_text(candidate_code, encoding="utf-8")
         test_file.write_text(test_code, encoding="utf-8")
 
+        py_bin = sys.executable
+        if getattr(sys, "frozen", False):
+            # Procura interpretador python para evitar reabrir PCI_Donor_Agent.exe
+            import shutil
+            for name in ("python.exe", "python", "python3"):
+                found = shutil.which(name)
+                if found and Path(found).resolve() != Path(sys.executable).resolve():
+                    py_bin = found
+                    break
+            else:
+                for cand in (
+                    Path(r"C:\Lab\012 - Auditoria (SESAU)\.venv\Scripts\python.exe"),
+                    Path(sys.executable).resolve().parents[2] / ".venv" / "Scripts" / "python.exe",
+                ):
+                    if cand.is_file():
+                        py_bin = str(cand)
+                        break
+
         cmd = [
-            sys.executable,
+            py_bin,
             "-m",
             "pytest",
             str(test_file),
@@ -303,6 +321,8 @@ class DonorWorkerAgent:
             f"pythonpath={task_sandbox}",
             "-q",
         ]
+
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         try:
             proc = subprocess.run(
                 cmd,
@@ -310,6 +330,7 @@ class DonorWorkerAgent:
                 capture_output=True,
                 text=True,
                 timeout=25,
+                creationflags=flags,
             )
             passed = proc.returncode == 0
             output = proc.stdout if passed else (proc.stdout + "\n" + proc.stderr)
@@ -749,4 +770,6 @@ def main():
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

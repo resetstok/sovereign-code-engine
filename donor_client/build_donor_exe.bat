@@ -29,6 +29,7 @@ echo [PCI ENGINE] Gerando executavel standalone (PCI_Donor_Agent.exe)...
 
 "!PYTHON_EXE!" -m PyInstaller ^
     --onefile ^
+    --noconsole ^
     --name PCI_Donor_Agent ^
     --collect-all customtkinter ^
     --hidden-import psutil ^
@@ -43,6 +44,6 @@ if %ERRORLEVEL% equ 0 (
     echo Localizacao: %SCRIPT_DIR%dist\PCI_Donor_Agent.exe
     echo =========================================================================
 ) else (
-    echo [FALHA] Erro durante a compilacao do executavel via PyInstaller.
-    exit /b %ERRORLEVEL%
+    echo [ERRO] Falha na compilacao do agente doador executavel.
+    exit /b 1
 )

@@ -55,6 +55,8 @@ def build_executable():
         "--hidden-import", "pci_engine.orchestrator",
         "--hidden-import", "pci_engine.database",
         "--hidden-import", "pci_engine.preflight",
+        "--hidden-import", "pci_engine.runtime_utils",
+        "--hidden-import", "uvicorn",
         "--hidden-import", "cryptography",
         "--hidden-import", "satellite_map",
         "--clean",
