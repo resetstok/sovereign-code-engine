@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional, Tuple
 import psutil
 
 from pci_engine.database import DatabaseManager
+from pci_engine.runtime_utils import get_python_runtime, get_subprocess_creation_flags
 from pci_engine.preflight import PreflightChecker
 
 logger = logging.getLogger("pci_engine.router")
@@ -323,11 +324,12 @@ class PCIRouter:
             test_file.write_text(test_code, encoding="utf-8")
 
             res = subprocess.run(
-                [sys.executable, "-m", "pytest", "-q", "--tb=short", "-o", "pythonpath=.", "--disable-warnings", str(test_file)],
+                [get_python_runtime(), "-m", "pytest", "-q", "--tb=short", "-o", "pythonpath=.", "--disable-warnings", str(test_file)],
                 cwd=str(worktree_dir),
                 capture_output=True,
                 text=True,
                 timeout=30,
+                creationflags=get_subprocess_creation_flags(),
             )
             return (res.returncode == 0), res.stdout, res.stderr
         except subprocess.TimeoutExpired:
@@ -358,11 +360,12 @@ class PCIRouter:
 
             try:
                 res = subprocess.run(
-                    [sys.executable, "-m", "pytest", "-q", "--tb=short", "-o", "pythonpath=.", "--disable-warnings", str(test_file)],
+                    [get_python_runtime(), "-m", "pytest", "-q", "--tb=short", "-o", "pythonpath=.", "--disable-warnings", str(test_file)],
                     cwd=tmpdir,
                     capture_output=True,
                     text=True,
                     timeout=30,
+                    creationflags=get_subprocess_creation_flags(),
                 )
                 return (res.returncode == 0), res.stdout, res.stderr
             except subprocess.TimeoutExpired:

@@ -25,6 +25,7 @@ import psutil
 
 from pci_engine.database import DatabaseManager
 from pci_engine.preflight import PreflightChecker
+from pci_engine.runtime_utils import get_python_runtime, get_subprocess_creation_flags
 
 try:
     from pci_engine.benchmark_tasks import BENCHMARK_TASKS
@@ -291,7 +292,7 @@ class BenchmarkRunner:
             test_path.write_text(test_code, encoding="utf-8")
 
             cmd = [
-                sys.executable,
+                get_python_runtime(),
                 "-m",
                 "pytest",
                 str(test_path),
@@ -300,7 +301,10 @@ class BenchmarkRunner:
                 "-q",
             ]
             try:
-                proc = subprocess.run(cmd, cwd=str(tmp_path), capture_output=True, text=True, timeout=20)
+                proc = subprocess.run(
+                    cmd, cwd=str(tmp_path), capture_output=True, text=True, timeout=20,
+                    creationflags=get_subprocess_creation_flags(),
+                )
                 passed = proc.returncode == 0
                 out = proc.stdout if passed else (proc.stdout + "\n" + proc.stderr)
                 return passed, out.strip()

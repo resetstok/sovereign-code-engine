@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from pci_engine.runtime_utils import get_python_runtime, get_subprocess_creation_flags
 import time
 import urllib.error
 import urllib.request
@@ -154,11 +155,12 @@ def run_candidate(task_dir: Path, code: str, timeout: float = 20.0) -> RunResult
             if not any(hint in k.upper() for hint in SECRET_HINTS)
         }
         env["PYTHONDONTWRITEBYTECODE"] = "1"
-        cmd = [sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", "--tb=short"]
+        cmd = [get_python_runtime(), "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", "--tb=short"]
         start = time.monotonic()
         try:
             proc = subprocess.run(
-                cmd, cwd=work, capture_output=True, text=True, timeout=timeout, env=env
+                cmd, cwd=work, capture_output=True, text=True, timeout=timeout, env=env,
+                creationflags=get_subprocess_creation_flags()
             )
         except subprocess.TimeoutExpired:
             return RunResult(False, time.monotonic() - start, -1, "timeout")
@@ -251,8 +253,9 @@ def run_task(
 def git_commit(paths: list[Path], message: str, log: Callable[[str], None] = print) -> None:
     """Commit opcional dos arquivos aceitos. Falha em silencio se nao houver git."""
     try:
-        subprocess.run(["git", "add", *map(str, paths)], check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", message], check=True, capture_output=True)
+        flags = get_subprocess_creation_flags()
+        subprocess.run(["git", "add", *map(str, paths)], check=True, capture_output=True, creationflags=flags)
+        subprocess.run(["git", "commit", "-m", message], check=True, capture_output=True, creationflags=flags)
         log(f"commit: {message}")
     except (OSError, subprocess.CalledProcessError) as exc:
         log(f"commit ignorado ({exc.__class__.__name__})")

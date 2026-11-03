@@ -23,6 +23,7 @@ import urllib.request
 import urllib.error
 
 from pci_engine.database import DatabaseManager
+from pci_engine.runtime_utils import get_python_runtime, get_subprocess_creation_flags
 
 logger = logging.getLogger("pci_engine.micro_harness")
 
@@ -466,7 +467,7 @@ Implemente o código de produção para '{target_file}' (NÃO inclua a função 
             self.tool_write(target_file, clean_code)
 
             # Roda o teste isolado via tool_bash com inclusão do repositório no pythonpath
-            python_bin = sys.executable
+            python_bin = get_python_runtime()
             test_output = self.tool_bash(f'"{python_bin}" -m pytest -q --tb=short -o pythonpath=. {test_file_path}')
             if "[EXIT_CODE: 0]" in test_output:
                 return {

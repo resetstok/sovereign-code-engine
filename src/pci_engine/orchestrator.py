@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from pydantic import BaseModel, Field
 
 from pci_engine.database import DatabaseManager
+from pci_engine.runtime_utils import get_python_runtime, get_subprocess_creation_flags
 from pci_engine.router import PCIRouterAndBroker
 
 logger = logging.getLogger("pci_engine.orchestrator")
@@ -329,7 +330,7 @@ class TaskExecutionOrchestrator:
 
             # 3. Executa Pytest isolado
             cmd_pytest = [
-                sys.executable,
+                get_python_runtime(),
                 "-m", "pytest",
                 "-q",
                 "--tb=short",
@@ -343,6 +344,7 @@ class TaskExecutionOrchestrator:
                 capture_output=True,
                 text=True,
                 timeout=timeout_sec,
+                creationflags=get_subprocess_creation_flags(),
             )
 
             if res_test.returncode == 0:
